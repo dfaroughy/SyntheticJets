@@ -1,6 +1,29 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+from sklearn.metrics import roc_curve, auc
+
+def ROC(LLR_bckg, LLR_sig):
+    """
+    Compute ROC curve and AUC
+    """
+
+    scores = np.concatenate([LLR_sig, LLR_bckg])
+    labels = np.concatenate([np.ones(LLR_bckg.shape[0]), np.zeros(LLR_bckg.shape[0])])
+
+    fpr, tpr, thresholds = roc_curve(labels, scores)
+    roc_auc = auc(fpr, tpr)
+
+    plt.figure(figsize=(4, 3))
+    plt.plot(tpr, 1 / fpr, label=f"AUC NP = {roc_auc:.2f}")
+    plt.plot([0, 1], [0, 1], "k--")
+    plt.xlabel("Toy tops efficiency")
+    plt.ylabel("Toy QCD rejection")
+    plt.title("ROC curve")
+    plt.legend()
+    plt.yscale("log")
+
+    plt.show()
 
 def kin_plots(toy_qcd, gen_jets, save_file='kin_plots.png'):
 

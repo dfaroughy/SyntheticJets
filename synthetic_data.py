@@ -2,8 +2,6 @@ import numpy as np
 import torch
 from scipy.integrate import quad
 from scipy.special import gammaln, gamma
-import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, auc
 from torch.utils.data import Dataset
 
 
@@ -121,7 +119,7 @@ class SyntheticJets:
         phi = sample[:, 1]
         return self._log_p_z(z, self.shape) + self._log_p_phi(phi, self.scale)
 
-    def token_to_bins(self, tokenized_sample):
+    def tokens_to_bins(self, tokenized_sample):
         # Compute the individual bin indices.
         z_bin = tokenized_sample % self.num_z_bins
         phi_bin = tokenized_sample // self.num_z_bins
@@ -170,51 +168,3 @@ class SyntheticJets:
         val, _ = quad(integrand, 0, np.inf, limit=100)
         return A + np.log(val)
 
-
-# def generate_tokenized_jets(model, N=128, D=30, temperature=1.0, device='cpu'):
-#     model.to(device)
-#     model.eval()
-#     start_tokens = torch.full((N, 1), model.start_token, device=model.device, dtype=torch.long)
-
-#     tokens = model.model.generate(
-#         input_ids=start_tokens,
-#         max_length=30 + 1,   # total length including the start token
-#         do_sample=True,
-#         temperature=temperature,
-#     )
-
-#     return tokens[:, 1:]   # remove start token
-
-
-def LLR(sample, signal, background):
-    logL_b = np.zeros(sample.shape[0])
-    logL_s = np.zeros(sample.shape[0])
-
-    for i in range(sample.shape[0]):
-        logL_s[i] = signal.log_prob(sample[i])
-        logL_b[i] = background.log_prob(sample[i])
-
-    return logL_s - logL_b
-
-
-def ROC(LLR_bckg, LLR_sig):
-    """
-    Compute ROC curve and AUC
-    """
-
-    scores = np.concatenate([LLR_sig, LLR_bckg])
-    labels = np.concatenate([np.ones(LLR_bckg.shape[0]), np.zeros(LLR_bckg.shape[0])])
-
-    fpr, tpr, thresholds = roc_curve(labels, scores)
-    roc_auc = auc(fpr, tpr)
-
-    plt.figure(figsize=(4, 3))
-    plt.plot(tpr, 1 / fpr, label=f"AUC NP = {roc_auc:.2f}")
-    plt.plot([0, 1], [0, 1], "k--")
-    plt.xlabel("Toy tops efficiency")
-    plt.ylabel("Toy QCD rejection")
-    plt.title("ROC curve")
-    plt.legend()
-    plt.yscale("log")
-
-    plt.show()
