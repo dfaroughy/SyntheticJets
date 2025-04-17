@@ -7,17 +7,17 @@ from torch.utils.data import DataLoader, random_split
 from synthetic_data import JetSequenceDataset
 
 ###############################################################################
-tags = 'tops'
+tags = ['qcd', 'coarse', 'pascal2']
 num_jets = 10000
 num_constituents = 30          
-shape = 3.0             # Gamma prior shape parameter.
-scale = 3.0             # Gaussian prior scale parameter.
-bins_z = np.linspace(0, 1, 21)
-bins_phi = np.linspace(-10,10, 21)  
+shape = 1.0             # Gamma prior shape parameter.
+scale = 1.0             # Gaussian prior scale parameter.
+bins_z = np.linspace(0, 1, 11)
+bins_phi = np.linspace(-15, 15, 16)  
 split_train_val = 0.8
 batch_size = 512
-n_embd = 256
-n_layer = 4
+n_embd = 128
+n_layer = 2
 n_head = 2
 lr = 1e-3
 max_epochs = 100

@@ -4,6 +4,7 @@ __pycache__/
 lightning_logs/
 experiments/
 plots/
+data/
 *.py[cod]
 *$py.class
 

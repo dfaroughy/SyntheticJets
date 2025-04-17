@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
 
 def ROC(LLR_bckg, LLR_sig):
@@ -14,7 +15,6 @@ def ROC(LLR_bckg, LLR_sig):
     fpr, tpr, thresholds = roc_curve(labels, scores)
     roc_auc = auc(fpr, tpr)
 
-    plt.figure(figsize=(4, 3))
     plt.plot(tpr, 1 / fpr, label=f"AUC NP = {roc_auc:.2f}")
     plt.plot([0, 1], [0, 1], "k--")
     plt.xlabel("Toy tops efficiency")
@@ -23,7 +23,6 @@ def ROC(LLR_bckg, LLR_sig):
     plt.legend()
     plt.yscale("log")
 
-    plt.show()
 
 def kin_plots(toy_qcd, gen_jets, save_file='kin_plots.png'):
 
