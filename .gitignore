@@ -5,6 +5,7 @@ lightning_logs/
 experiments/
 plots/
 data/
+scripts/
 *.py[cod]
 *$py.class
 

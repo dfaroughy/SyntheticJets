@@ -40,6 +40,7 @@ class GPT2Model(L.LightningModule):
         self.bins_phi = bins_phi
         self.do_sample = True  # sample multinomial
         self.temperature = 1.0
+        self.top_k = None
 
         self.synthetic_jets = SyntheticJets(
             shape_param=shape_param,
@@ -85,7 +86,6 @@ class GPT2Model(L.LightningModule):
         self.log(
             "train_loss",
             loss,
-            on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
@@ -99,7 +99,6 @@ class GPT2Model(L.LightningModule):
         self.log(
             "val_loss",
             loss,
-            on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
@@ -117,6 +116,7 @@ class GPT2Model(L.LightningModule):
             max_length=self.seq_length + 1,  # total seq length
             do_sample=self.do_sample,    
             temperature=self.temperature,
+            top_k = self.top_k,
             bos_token_id=self.start_token,
             pad_token_id=self.start_token + 1,  # avoid warning
         )
