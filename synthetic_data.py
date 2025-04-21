@@ -10,10 +10,10 @@ class JetSequenceDataset(Dataset):
         self,
         num_samples: int,
         num_constituents: int = 30,
-        shape_param: float = 1.0,
-        scale_param: float = 1.0,
-        bins_z: np.ndarray = np.linspace(0, 1, 10),
-        bins_phi: np.ndarray = np.linspace(-4, 4, 10),
+        shape_param: float = 1.0,     
+        scale_param: float = 1.0,     
+        bins_z: np.ndarray = np.linspace(0, 1, 10),   
+        bins_phi: np.ndarray = np.linspace(-4, 4, 10), 
     ):
         """
         A PyTorch Dataset that produces synthetic jet sequences on the fly.
@@ -59,12 +59,12 @@ class JetSequenceDataset(Dataset):
 class SyntheticJets:
     def __init__(
         self,
-        shape_param=1.0,
-        scale_param=1.0,
-        tokenize=False,
-        z_order=False,
-        bins_z=None,
-        bins_phi=None,
+        shape_param=1.0,   # k hyper-param in Gamma(beta|k) prior
+        scale_param=1.0,   # Sigma hyper-param in N(phi|0,Sigma) prior
+        tokenize=False,    # True: tokenized constituents
+        z_order=False,     # True: canonically ordered
+        bins_z=None,       # bins for tokenization
+        bins_phi=None,     # bins for tokenization
     ):
         self.shape = shape_param
         self.scale = scale_param
@@ -85,13 +85,13 @@ class SyntheticJets:
 
         for i in range(N):
             beta = np.random.gamma(shape=self.shape)   
-            mean = np.random.normal(loc=0.0, scale=self.scale)
+            # mean = np.random.normal(loc=0.0, scale=self.scale)
 
             event_points = np.zeros((num_constituents, 2))
 
             for j in range(num_constituents):
                 z = np.random.beta(0.5, 1 + beta)
-                phi = np.random.normal(loc=mean + beta, scale=beta)
+                phi = np.random.normal(loc=self.scale * z - beta, scale=z)
                 event_points[j, :] = [z, phi]
 
             if self.z_order:
@@ -112,6 +112,16 @@ class SyntheticJets:
 
         return samples
 
+    def log_prob(self, sample, alpha=0.5):
+        """
+        sample: shape (N, D, 2)
+        returns array of length N of log‐prob per jet.
+        """
+        Sigma = self.scale
+        k = self.shape
+        return np.array([self._log_likelihood(sample[i], k, Sigma, alpha)
+                        for i in range(len(sample))])
+
     def tokens_to_bins(self, tokenized_sample):
         # Compute the individual bin indices.
         z_bin = tokenized_sample % self.num_z_bins
@@ -123,47 +133,79 @@ class SyntheticJets:
         return np.stack((z_center, phi_center), axis=-1)
 
 
-    # def log_prob(self, sample):
-    #     z = sample[:, 0]
-    #     phi = sample[:, 1]
-    #     return self._log_p_z(z, self.shape) + self._log_p_phi(phi, self.scale)
+    def log_probs(self, sample, alpha=0.5):
+            """
+            sample: shape (N, D, 2)
+            returns array of length N of log‐prob per jet.
+            """
+            k = self.shape
+            scale = self.scale
+            return np.array([
+                self._log_likelihood(sample[i], k, scale, alpha)
+                for i in range(len(sample))
+            ])
 
-    # def _log_p_phi(self, x, scale):
-    #     # Computes log p(y) from the marginal over the latent mean.
-    #     # Assume y_i ~ N(mu_lat,1) with mu_lat ~ N(0, sigma^2), mu=0.
-    #     D = len(x)
-    #     sum_x = np.sum(x)
-    #     sum_x2 = np.sum(x**2)
-    #     term1 = D * np.log(2 * np.pi)
-    #     term2 = np.log(1 + D * scale**2)
-    #     term3 = sum_x2 - (sum_x**2) / (D + 1 / scale**2)
-    #     return -0.5 * (term1 + term2 + term3)
+    def _log_likelihood(self, sample, k, scale, alpha=0.5):
+        """
+        Jet log‐likelihood with z,phi and latent beta integrated out.
+        sample:      array of shape (D,2), columns = [z, phi]
+        k:           Gamma prior shape on beta
+        scale:       the 'scale' hyper‑parameter
+        alpha:       Beta prior first shape
+        """
+        z = sample[:, 0]
+        phi = sample[:, 1]
+        D = len(z)
 
-    # def _log_p_z(self, x, shape):
-    #     """
-    #     Computes the log marginal likelihood for the x-data,
-    #     where for a given sample of D x-values:
+        sum_log_z   = np.sum(np.log(z))
+        sum_log_1mz = np.sum(np.log(1 - z))
+        log_gamma_k = gammaln(k)
 
-    #     x_i ~ Beta(0.5, 1+alpha)   with likelihood:
-    #         p(x|alpha) = (Gamma(alpha+beta)/(Gamma(0.5)*Gamma(1+alpha))) * x^(-0.5)*(1-x)^(alpha)
+        def integrand(beta):
+            log_p_beta = (k - 1) * np.log(beta) - beta - log_gamma_k
+            A = gammaln(alpha + 1 + beta) - gammaln(alpha) - gammaln(1 + beta)
+            log_p_z = D * A + (alpha - 1) * sum_log_z + beta * sum_log_1mz
+            quad_term = -0.5 * (D * np.log(2 * np.pi) + 2 * sum_log_z)
+            sq_err   = np.sum(((phi - (scale * z - beta))**2) / (z**2))
+            log_p_phi = quad_term - 0.5 * sq_err
 
-    #     and
-    #     alpha ~ Gamma(k,1)   with density:  p(alpha)=alpha^(k-1)*exp(-alpha)/Gamma(k)
+            return np.exp(log_p_beta + log_p_z + log_p_phi)
 
-    #     We define:
-    #         S = sum_i ln(1-x_i)
-    #     and there is an extra constant from the x^(-0.5) factors.
-    #     """
-    #     D = len(x)
-    #     T = np.sum(np.log(x))
-    #     S = np.sum(np.log(1 - x))
+        val, err = quad(integrand, 0, np.inf, limit=200)
 
-    #     A = -0.5 * T - np.log(gamma(shape)) - D * 0.5 * np.log(np.pi)
+        return np.log(val)
 
-    #     def integrand(beta):
-    #         log_ratio = gammaln(1.5 + beta) - gammaln(1 + beta)
-    #         return np.exp(-beta * (1 - S)) * np.exp(D * log_ratio) * beta ** (shape - 1)
 
-    #     val, _ = quad(integrand, 0, np.inf, limit=100)
-    #     return A + np.log(val)
+    def _log_likelihood(self, sample, k, scale, alpha=0.5, gam=1.0):
+        """
+        Jet log‐likelihood with z,phi and latent beta integrated out.
+        sample:      array of shape (D,2), columns = [z, phi]
+        k:           Gamma prior shape on beta
+        scale:       the 'scale' hyper‑parameter
+        alpha:       Beta prior first shape
+        """
+        
+        z = sample[:, 0]
+        phi = sample[:, 1]
+        
+        D = len(z)
+        x = (phi - gam * z) / z
+        sum_log_z   = np.sum(np.log(z))
+        sum_log_1mz = np.sum(np.log(1 - z))
+        A_tilde = np.sum(x**2) - (alpha - 2) * sum_log_z 
+
+        logp = A_tilde - 0.5 * D * np.log(2 * np.pi) - D * gammaln(alpha) - gammaln(k)
+
+        a = 0.5 + np.sum(x) - sum_log_1mz
+        b = np.sum(1/(x**2))
+
+        def integrand(beta):
+            I = (k-1) * np.log(beta) + D * gammaln(1 + alpha + beta) - D * gammaln(1 + beta)
+            J =  + a * beta + b * beta**2 
+            return np.exp(I + J)
+
+        val, err = quad(integrand, 0, np.inf, limit=200)
+        logp += np.log(val)
+        return logp
+
 
