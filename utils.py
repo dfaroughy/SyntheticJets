@@ -133,7 +133,7 @@ def kin_plots(toy_qcd, gen_jets, save_file='kin_plots.png'):
 
 
 
-def ordered_z_plots(toy_qcd, gen_jets, save_file='ordered_z_plots.png'):
+def ordered_z_plots(toy_qcd, gen_jets, save_file='ordered_z_plots.png', feat=0):
 
     fig, ax = plt.subplots(3, 2, figsize=(6, 6))
 
@@ -141,8 +141,8 @@ def ordered_z_plots(toy_qcd, gen_jets, save_file='ordered_z_plots.png'):
 
     # --- Plot hardest ---
 
-    sns.histplot(toy_qcd[:,0,:][...,0], bins=bins, alpha=0.25, color='darkred', lw=0, label='data', element='step', stat='density', ax=ax[0, 0])
-    sns.histplot(gen_jets[:,0,:][...,0], bins=bins,  fill=False, color='crimson', lw=1, label='gpt2', element='step', stat='density', ax=ax[0, 0])
+    sns.histplot(toy_qcd[:,0,:][...,feat], bins=bins, alpha=0.25, color='darkred', lw=0, label='data', element='step', stat='density', ax=ax[0, 0])
+    sns.histplot(gen_jets[:,0,:][...,feat], bins=bins,  fill=False, color='crimson', lw=1, label='gpt2', element='step', stat='density', ax=ax[0, 0])
 
     ax[0,0].set_ylabel('Density')
     ax[0,0].set_xlabel(r'hardest $z$')
@@ -150,53 +150,53 @@ def ordered_z_plots(toy_qcd, gen_jets, save_file='ordered_z_plots.png'):
     ax[0,0].set_xlim(0, 1)
 
 
-    sns.histplot(toy_qcd[:,5,:][...,0], bins=bins,   alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[0, 1])
-    sns.histplot(gen_jets[:,5,:][...,0], bins=bins,  fill=False, color='crimson', lw=1, label='gpt2', element='step', stat='density', ax=ax[0, 1])
+    sns.histplot(toy_qcd[:,5,:][...,feat], bins=bins,   alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[0, 1])
+    sns.histplot(gen_jets[:,5,:][...,feat], bins=bins,  fill=False, color='crimson', lw=1, label='gpt2', element='step', stat='density', ax=ax[0, 1])
     ax[0,1].set_ylabel('')
     ax[0,1].set_xlabel(r'5th hardest $z$')
 
 
-    bins=np.arange(0, 0.6, 0.01)
+    # bins=np.arange(0, 0.6, 0.01)
 
-    sns.histplot(toy_qcd[:,10,:][...,0], bins=bins,  alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[1, 0])
-    sns.histplot(gen_jets[:,10,:][...,0], bins=bins,  fill=False, color='crimson', lw=1, label='S', element='step', stat='density', ax=ax[1, 0])
+    sns.histplot(toy_qcd[:,10,:][...,feat], bins=bins,  alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[1, 0])
+    sns.histplot(gen_jets[:,10,:][...,feat], bins=bins,  fill=False, color='crimson', lw=1, label='S', element='step', stat='density', ax=ax[1, 0])
 
     ax[1,0].set_ylabel('Density')
     ax[1,0].set_xlabel(r'10th hardest $z$')
     # ax[1,0].legend(loc='upper right', fontsize=6)
-    ax[1,0].set_xlim(0, 0.6)
+    # ax[1,0].set_xlim(0, 0.6)
 
-    bins=np.arange(0, 0.6, 0.008)
+    # bins=np.arange(0, 0.6, 0.008)
 
-    sns.histplot(toy_qcd[:,15,:][...,0], bins=bins,  alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[1, 1])
-    sns.histplot(gen_jets[:,15,:][...,0], bins=bins, fill=False, color='crimson', lw=1, label='S', element='step', stat='density', ax=ax[1, 1])
+    sns.histplot(toy_qcd[:,15,:][...,feat], bins=bins,  alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[1, 1])
+    sns.histplot(gen_jets[:,15,:][...,feat], bins=bins, fill=False, color='crimson', lw=1, label='S', element='step', stat='density', ax=ax[1, 1])
     ax[1,1].set_ylabel('')
     ax[1,1].set_xlabel(r'15th hardest $z$')
     # ax[1,1].legend(loc='upper right', fontsize=6)
-    ax[1,1].set_xlim(0, 0.6)
+    # ax[1,1].set_xlim(0, 0.6)
 
 
     # Middle row: intermediate distributions
 
-    bins=np.arange(0, 0.2, 0.004)
+    # bins=np.arange(0, 0.2, 0.004)
 
-    sns.histplot(toy_qcd[:,20,:][...,0], bins=bins,  alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[2, 0])
-    sns.histplot(gen_jets[:,20,:][...,0], bins=bins, fill=False,  color='crimson', lw=1, label='S', element='step', stat='density', ax=ax[2, 0])
+    sns.histplot(toy_qcd[:,20,:][...,feat], bins=bins,  alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[2, 0])
+    sns.histplot(gen_jets[:,20,:][...,feat], bins=bins, fill=False,  color='crimson', lw=1, label='S', element='step', stat='density', ax=ax[2, 0])
 
     ax[2,0].set_ylabel('Density')
     ax[2,0].set_xlabel(r' 20th hardest $z$')
     # ax[2,0].legend(loc='upper right', fontsize=6)
-    ax[2,0].set_xlim(0, 0.4)
+    # ax[2,0].set_xlim(0, 0.4)
 
 
-    bins=np.arange(0, 0.05, 0.001)
+    # bins=np.arange(0, 0.05, 0.001)
 
-    sns.histplot(toy_qcd[:,25,:][...,0], bins=bins,  alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[2, 1])
-    sns.histplot(gen_jets[:,25,:][...,0], bins=bins, fill=False,  color='crimson', lw=1, label='S', element='step', stat='density', ax=ax[2, 1])
+    sns.histplot(toy_qcd[:,25,:][...,feat], bins=bins,  alpha=0.25, color='darkred', lw=0, label='B', element='step', stat='density', ax=ax[2, 1])
+    sns.histplot(gen_jets[:,25,:][...,feat], bins=bins, fill=False,  color='crimson', lw=1, label='S', element='step', stat='density', ax=ax[2, 1])
     ax[2,1].set_ylabel('')
     ax[2,1].set_xlabel(r'25th hardest $z$')
     # ax[2,1].legend(loc='upper right', fontsize=6)
-    ax[2,1].set_xlim(0, 0.1)
+    # ax[2,1].set_xlim(0, 0.1)
 
     plt.tight_layout()
     fig.subplots_adjust(hspace=0.65, wspace=0.3) 
