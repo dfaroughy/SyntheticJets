@@ -1,6 +1,6 @@
 import numpy as np
 import pytorch_lightning as L
-from models import GPT2Model
+from models import JetGPT2Model
 from pytorch_lightning.loggers import CometLogger
 from torch.utils.data import DataLoader, random_split
 
@@ -44,7 +44,7 @@ train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_dataloader   = DataLoader(val_dataset,   batch_size=batch_size, shuffle=False)
 
-gpt2 = GPT2Model(
+gpt2 = JetGPT2Model(
                 seq_length=num_constituents,
                 vocab_size=dataset.vocab_size, 
                 n_embd=n_embd,

@@ -8,7 +8,7 @@ from transformers import GPT2LMHeadModel, GPT2Config
 from synthetic_data import SyntheticJets
 
 
-class GPT2Model(L.LightningModule):
+class JetGPT2Model(L.LightningModule):
     def __init__(
         self,
         seq_length=30,
@@ -16,6 +16,7 @@ class GPT2Model(L.LightningModule):
         n_embd=128,
         n_layer=2,
         n_head=1,
+        pos_encoding=True,
         learning_rate=5e-4,
         shape_param=1.0,
         scale_param=1.0,
@@ -41,6 +42,7 @@ class GPT2Model(L.LightningModule):
         self.do_sample = True  # sample multinomial
         self.temperature = 1.0
         self.top_k = None
+        self.pos_encoding = pos_encoding
 
         self.synthetic_jets = SyntheticJets(
             shape_param=shape_param,
@@ -72,6 +74,12 @@ class GPT2Model(L.LightningModule):
         )
 
         self.model = GPT2LMHeadModel(config)
+
+        if not self.pos_encoding: # remove the learned positional embeddings
+            with torch.no_grad():
+                self.model.transformer.wpe.weight.zero_()
+            self.model.transformer.wpe.weight.requires_grad = False
+
         self.save_hyperparameters()
 
     # ...training functions
