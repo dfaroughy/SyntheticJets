@@ -7,27 +7,24 @@ from torch.utils.data import DataLoader, random_split
 from synthetic_data import JetSequenceDataset
 
 ###############################################################################
-tags = ['small_model', 'signal', 'perlmutter']
-num_jets = 500_000
+tags = ['qcd', 'coarse', 'pascal2']
+num_jets = 10000
 num_constituents = 30          
-shape = 3.0             # Gamma prior shape parameter.
-scale = 3.0             # Gaussian prior scale parameter.
-
-bins_z = np.linspace(0, 1, 21)
-bins_phi = np.linspace(-15, 15, 31)  
+shape = 1.0             # Gamma prior shape parameter.
+scale = 1.0             # Gaussian prior scale parameter.
+bins_z = np.linspace(0, 1, 11)
+bins_phi = np.linspace(-15, 15, 16)  
 split_train_val = 0.8
 batch_size = 512
-n_embd = 32
-n_layer = 1
-n_head = 1
-pos_encoding = False
-lr = 2.0e-4
-max_epochs = 500
+n_embd = 128
+n_layer = 2
+n_head = 2
+lr = 1e-3
+max_epochs = 100
 logger = CometLogger(api_key='8ONjCXJ1ogsqG1UxQzKxYn7tz', 
                      project_name='synthetic-jets',
                      workspace='dfaroughy', 
-                     save_dir='/pscratch/sd/d/dfarough/'
-)
+                     save_dir='/home/df630/SyntheticJets/experiments/results/comet')
 
 ###############################################################################
 
@@ -53,7 +50,6 @@ gpt2 = JetGPT2Model(
                 n_embd=n_embd,
                 n_layer=n_layer,
                 n_head=n_head,
-                pos_encoding=pos_encoding,
                 learning_rate=lr,
                 shape_param=shape,
                 scale_param=scale,
@@ -65,8 +61,8 @@ logger.experiment.add_tags(tags)
 
 trainer = L.Trainer(max_epochs=max_epochs, 
                     accelerator='gpu', 
-                    devices=[0,1,2,3], 
-                    strategy='ddp',
+                    devices=[0,2,3], 
+                    strategy='auto',
                     callbacks=[L.callbacks.ModelCheckpoint(dirpath=None,
                                                            monitor="val_loss",
                                                            filename="best",
@@ -77,7 +73,6 @@ trainer = L.Trainer(max_epochs=max_epochs,
                     logger=logger,
                     sync_batchnorm=True,
                     gradient_clip_val=1.0,
-                    num_nodes=1,
                     )
 
 trainer.fit(gpt2, train_dataloader, val_dataloader)
