@@ -71,6 +71,7 @@ class JetGPT2Model(L.LightningModule):
             n_layer=n_layer,
             n_head=n_head,
             bos_token_id=self.start_token,
+            eos_token_id=self.start_token
         )
 
         self.model = GPT2LMHeadModel(config)
