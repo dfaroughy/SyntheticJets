@@ -3,9 +3,80 @@ import torch
 from scipy.integrate import quad
 from scipy.special import gammaln, gamma
 from torch.utils.data import Dataset
+import h5py
+import pandas as pd
 
 
 class JetSequenceDataset(Dataset):
+    def __init__(
+        self,
+        filepath: str,
+        num_jets: int = None,
+        max_seq_length: int = 200,  # dataset max num consituents
+        bins: list = [41, 31, 31],
+    ):
+        self.filepath = filepath
+        self.num_jets = num_jets
+        self.num_features = len(bins) 
+        self.bins = bins
+        self.num_bins = int(np.prod(self.bins))
+        self.max_seq_length = max_seq_length   
+
+        # special tokens:
+        self.start_token = self.num_bins + 1    
+        self.end_token = self.num_bins + 2        
+        self.pad_token = self.num_bins + 3      
+
+        print(f"INFO: start token: {self.start_token}")
+        print(f"INFO: end token: {self.end_token}")
+        print(f"INFO: pad token: {self.pad_token}")
+        
+        seq = self._sequencize_jetclass()    # shape (N, D)
+        self.input_ids = torch.from_numpy(seq).long()
+        self.attention_mask = (self.input_ids != self.pad_token).long()
+        self.multiplicity = self.attention_mask.sum(axis=1)
+        self.end_token_idx = self.multiplicity
+
+        for i in range(self.input_ids.size(0)):
+            self.input_ids[i][self.multiplicity[i]] = self.end_token
+            self.attention_mask[i][self.multiplicity[i]] = 1
+
+    def __len__(self):
+        return self.input_ids.size(0)
+
+    def __getitem__(self, idx):
+        return {
+            "input_ids":      self.input_ids[idx],      
+            "attention_mask": self.attention_mask[idx],
+        }
+
+    def _sequencize_jetclass(self):
+
+        with h5py.File(self.filepath, "r") as f:
+            arr = f['discretized/block0_values']
+            data = arr[:] if self.num_jets is None else arr[: self.num_jets]
+
+        df = pd.DataFrame(data)
+        x = df.to_numpy(dtype=np.int64) 
+        x = x.reshape(x.shape[0], -1, self.num_features)
+        N, D, _ = x.shape
+
+        seq = self._seq_encoding(x)
+        start = np.full((N, 1), self.start_token, dtype=np.int64) # start token 
+        seq = np.concatenate((start, seq), axis=1) 
+        seq[seq < 0] = self.pad_token
+        return seq[:, :-1] # rm last dummy column to keep seq_length=200
+
+    def _seq_encoding(self, x):
+        """ encode the 3-D binned jet constituents into a 1-D sequence of tokens 
+        """
+        tokens = (x[..., 0] * self.bins[1] + x[..., 1]) * self.bins[2] + x[..., 2]
+        return tokens
+    
+
+
+
+class SyntheticJetSequenceDataset(Dataset):
     def __init__(
         self,
         num_samples: int,
