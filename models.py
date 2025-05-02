@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import pytorch_lightning as L
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn.functional as F
 
@@ -14,9 +15,11 @@ class JetGPT2Model(L.LightningModule):
         seq_length: int = 200,
         bins: list = [41, 31, 31],
         n_embd=128,
+        n_inner=None,
         n_layer=2,
         n_head=1,
         learning_rate=5e-4,
+        learning_rate_final=0.0,
     ):
         super().__init__()
 
@@ -25,6 +28,7 @@ class JetGPT2Model(L.LightningModule):
         self.bins = bins
         self.vocab_size = bins[0] * bins[1] * bins[2]
         self.lr = learning_rate
+        self.lr_final = learning_rate_final
         self.do_sample = True  # sample multinomial
         self.temperature = 1.0
         self.top_k = None
@@ -39,6 +43,7 @@ class JetGPT2Model(L.LightningModule):
             n_positions=seq_length + 1,
             n_ctx=seq_length + 1,
             n_embd=n_embd,
+            n_inner=n_inner if n_inner is not None else 4*n_embd,
             n_layer=n_layer,
             n_head=n_head,
             bos_token_id=self.start_token,
@@ -119,10 +124,8 @@ class JetGPT2Model(L.LightningModule):
 
         for seq in generated_seq:
             seq = seq[1:] # rm start token
-            idx = (seq == self.end_token)
-            seq[idx] = -1 # replace end token with -1 pad token
-            idx = (seq == self.pad_token)
-            seq[idx] = -1 # replace pad token with -1 pad token
+            seq[seq == self.end_token] = -1 # replace end token with -1
+            seq[seq == self.pad_token] = -1 # replace pad token with -1
 
             if seq.numel() <= self.seq_length:
                 seq = F.pad(seq, (0, self.seq_length - seq.numel()), value=-1)
@@ -131,8 +134,24 @@ class JetGPT2Model(L.LightningModule):
             
         return torch.stack(results)
 
+
     def configure_optimizers(self):
-        return torch.optim.AdamW(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+
+        scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=self.trainer.max_epochs,    # full cycle length
+            eta_min=self.lr_final             # final LR
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",   
+                "frequency": 1,
+                "strict": True,
+            },
+        }
 
     @torch.no_grad()
     def log_probs(self, sample, batch_size=256, device="cuda"):
