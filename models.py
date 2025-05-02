@@ -103,27 +103,33 @@ class JetGPT2Model(L.LightningModule):
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
 
-        seq = self.model.generate(
-            input_ids=batch,
-            max_new_tokens=self.seq_length, 
-            do_sample=self.do_sample,
-            temperature=self.temperature,
-            top_k = self.top_k,
-            bos_token_id=self.start_token,
-            eos_token_id=self.end_token,
-            pad_token_id=self.pad_token,
-        )
-        seq = seq.detach().cpu()
-        return  seq # rm start token
+        generated_seq = self.model.generate(
+                            input_ids=batch,
+                            max_new_tokens=self.seq_length, 
+                            do_sample=self.do_sample,
+                            temperature=self.temperature,
+                            top_k = self.top_k,
+                            bos_token_id=self.start_token,
+                            eos_token_id=self.end_token,
+                            pad_token_id=self.pad_token,
+                        )
 
-        # results = []
-        # for seq in generated_seq:
-        #     seq = seq[1:] # rm start token
-        #     idx_end_token = (seq == self.end_token).nonzero(as_tuple=True)[0]
-        #     if idx_end_token.numel() > 0:
-        #         seq = seq[: idx_end_token[0]]
-        #     results.append(seq.detach().cpu())
-        # return results
+        generated_seq = generated_seq.detach().cpu()
+        results = []
+
+        for seq in generated_seq:
+            seq = seq[1:] # rm start token
+            idx = (seq == self.end_token)
+            seq[idx] = -1 # replace end token with -1 pad token
+            idx = (seq == self.pad_token)
+            seq[idx] = -1 # replace pad token with -1 pad token
+
+            if seq.numel() <= self.seq_length:
+                seq = F.pad(seq, (0, self.seq_length - seq.numel()), value=-1)
+
+            results.append(seq.detach().cpu())
+            
+        return torch.stack(results)
 
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.lr)
@@ -175,14 +181,6 @@ class JetGPT2Model(L.LightningModule):
         preds = logits.argmax(dim=-1).squeeze(0)
 
         return preds.cpu(), token_log_probs.cpu()
-
-
-
-
-
-
-
-
 
 
 
@@ -299,16 +297,17 @@ class SyntheticJetGPT2Model(L.LightningModule):
         """outputs a jet sequence and the corresponding binned jet
         """
         seq = self.model.generate(
-            input_ids=batch,
-            max_length=self.seq_length + 1,  # total seq length
-            do_sample=self.do_sample,    
-            temperature=self.temperature,
-            top_k = self.top_k,
-            bos_token_id=self.start_token,
-            pad_token_id=self.start_token + 1,  # avoid warning
-        )
+                                input_ids=batch,
+                                max_length=self.seq_length + 1,  # total seq length
+                                do_sample=self.do_sample,    
+                                temperature=self.temperature,
+                                top_k = self.top_k,
+                                bos_token_id=self.start_token,
+                                pad_token_id=self.start_token + 1,
+                                )
 
         seq = seq.detach().cpu()
+
         return  seq[:, 1:]  # rm start token
 
     def configure_optimizers(self):

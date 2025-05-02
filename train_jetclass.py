@@ -11,12 +11,12 @@ from synthetic_data import JetSequenceDataset
 ##########################################################################
 tags = ['qcd', 'pascal2']
 bins            = [41, 31, 31]
-batch_size      = 100
-n_embd          = 64
-n_layer         = 2
-n_head          = 1
+batch_size      = 32
+n_embd          = 128
+n_layer         = 4
+n_head          = 4
 lr              = 1e-3
-max_epochs      = 100
+max_epochs      = 500
 ##########################################################################
 
 logger = CometLogger(
@@ -29,12 +29,12 @@ logger.experiment.add_tags(tags)
 
 train_dataset = JetSequenceDataset(
     filepath="data/TTBar_train___1Mfromeach_403030.h5",
-    num_jets=5_000,
+    num_jets=100_000,
 )
 
 val_dataset = JetSequenceDataset(
     filepath="data/TTBar_val___1Mfromeach_403030.h5",
-    num_jets=1_000,
+    num_jets=10_000,
 )
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -50,7 +50,7 @@ model = JetGPT2Model(
 trainer = L.Trainer(
     max_epochs=max_epochs,
     accelerator='gpu',
-    devices=[1,2,3],
+    devices=[0,1,2,3],
     strategy='auto',
     callbacks=[
         L.callbacks.ModelCheckpoint(
@@ -63,6 +63,7 @@ trainer = L.Trainer(
         )
     ],
     logger=logger,
+    precision=16,
     sync_batchnorm=True,
     gradient_clip_val=1.0,
 )

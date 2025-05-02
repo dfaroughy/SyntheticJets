@@ -20,18 +20,22 @@ class JetSequenceDataset(Dataset):
         self.num_features = len(bins) 
         self.bins = bins
         self.num_bins = int(np.prod(self.bins))
-        self.max_seq_length = max_seq_length   
 
         # special tokens:
-        self.start_token = self.num_bins + 1    
-        self.end_token = self.num_bins + 2        
-        self.pad_token = self.num_bins + 3      
 
-        print(f"INFO: start token: {self.start_token}")
-        print(f"INFO: end token: {self.end_token}")
-        print(f"INFO: pad token: {self.pad_token}")
-        
-        seq = self._sequencize_jetclass()    # shape (N, D)
+        self.start_token = self.num_bins + 1  
+        self.end_token = self.num_bins + 2       
+        self.pad_token = self.num_bins + 3   
+
+        jet_sequence = JetSequence(filepath=filepath,
+                                   num_jets=num_jets,
+                                   max_seq_length=max_seq_length,
+                                   bins=bins,
+                                   start_token=self.start_token,
+                                   end_token=self.end_token,
+                                   pad_token=self.pad_token)    
+
+        seq = jet_sequence.map_to_sequence()  # shape (N, D)
         self.input_ids = torch.from_numpy(seq).long()
         self.attention_mask = (self.input_ids != self.pad_token).long()
         self.multiplicity = self.attention_mask.sum(axis=1)
@@ -50,30 +54,75 @@ class JetSequenceDataset(Dataset):
             "attention_mask": self.attention_mask[idx],
         }
 
-    def _sequencize_jetclass(self):
+
+
+class JetSequence:
+    def __init__(
+        self,
+        filepath: str,
+        num_jets: int = None,
+        max_seq_length: int = 200,  # dataset max num consituents
+        bins: list = [41, 31, 31],
+        start_token: int = None,
+        end_token: int = None,
+        pad_token: int = -1,
+    ):
+        self.filepath = filepath
+        self.num_jets = num_jets
+        self.num_features = len(bins) 
+        self.bins = bins
+        self.max_seq_length = max_seq_length   
+
+        self.start_token = start_token
+        self.end_token = end_token
+        self.pad_token = pad_token
+
+        print(f"INFO: start token: {self.start_token}")
+        print(f"INFO: end token: {self.end_token}")
+        print(f"INFO: pad token: {self.pad_token}")
+
+                    
+    def map_to_sequence(self):
 
         with h5py.File(self.filepath, "r") as f:
             arr = f['discretized/block0_values']
             data = arr[:] if self.num_jets is None else arr[: self.num_jets]
-
+                
         df = pd.DataFrame(data)
-        x = df.to_numpy(dtype=np.int64) 
+        x = df.to_numpy() 
         x = x.reshape(x.shape[0], -1, self.num_features)
         N, D, _ = x.shape
 
-        seq = self._seq_encoding(x)
-        start = np.full((N, 1), self.start_token, dtype=np.int64) # start token 
-        seq = np.concatenate((start, seq), axis=1) 
+        seq = self.bins_to_seq_encoding(x)
+        if self.start_token is not None:
+            start = np.full((N, 1), self.start_token)
+            seq = np.concatenate((start, seq), axis=1) 
+
         seq[seq < 0] = self.pad_token
+
         return seq[:, :-1] # rm last dummy column to keep seq_length=200
 
-    def _seq_encoding(self, x):
+    def bins_to_seq_encoding(self, x):
         """ encode the 3-D binned jet constituents into a 1-D sequence of tokens 
         """
-        tokens = (x[..., 0] * self.bins[1] + x[..., 1]) * self.bins[2] + x[..., 2]
-        return tokens
+        seq = (x[..., 0] * self.bins[1] + x[..., 1]) * self.bins[2] + x[..., 2]
+        return seq
     
+    def seq_to_bins_decoding(self, seq):
+        """
+        Decode a 1-D sequence of token IDs back into bin triplets ids (a,b,c).
+        """
+        pt, eta, phi = self.bins
+        eta_phi = eta * phi
+        a = seq // (eta * phi)
+        rem = seq % (eta * phi)
+        b = rem // phi
+        c = rem % phi
 
+        b[a < 0] = -1
+        c[a < 0] = -1
+
+        return np.stack([a, b, c], axis=-1)
 
 
 class SyntheticJetSequenceDataset(Dataset):
