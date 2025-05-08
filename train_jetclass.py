@@ -9,7 +9,7 @@ from models import JetGPT2Model
 from synthetic_data import JetSequenceDataset
 
 ##########################################################################
-tags = ['qcd', 'pascal2']
+tags = ['ZJetsToNuNu', 'pascal2']
 bins            = [41, 31, 31]
 batch_size      = 32
 n_embd          = 128
@@ -28,12 +28,12 @@ logger = CometLogger(
 logger.experiment.add_tags(tags)
 
 train_dataset = JetSequenceDataset(
-    filepath="data/TTBar_train___1Mfromeach_403030.h5",
+    filepath="data/ZJetsToNuNu_train___1Mfromeach_403030.h5",
     num_jets=100_000,
 )
 
 val_dataset = JetSequenceDataset(
-    filepath="data/TTBar_val___1Mfromeach_403030.h5",
+    filepath="data/ZJetsToNuNu_val___1Mfromeach_403030.h5",
     num_jets=10_000,
 )
 

@@ -126,11 +126,10 @@ class JetGPT2Model(L.LightningModule):
             seq = seq[1:] # rm start token
             seq[seq == self.end_token] = -1 # replace end token with -1
             seq[seq == self.pad_token] = -1 # replace pad token with -1
-
-            if seq.numel() <= self.seq_length:
+            if seq.numel() < self.seq_length:
                 seq = F.pad(seq, (0, self.seq_length - seq.numel()), value=-1)
 
-            results.append(seq.detach().cpu())
+            results.append(seq)
             
         return torch.stack(results)
 
@@ -153,37 +152,91 @@ class JetGPT2Model(L.LightningModule):
             },
         }
 
+
     @torch.no_grad()
     def log_probs(self, sample, batch_size=256, device="cuda"):
-        self.model.eval().to(device)
-        N = sample.size(0)
+        self.model.eval()
+        self.model.to(device)
+        N = sample.shape[0]
 
-        # prepend BOS
-        bos = torch.full((N, 1), self.start_token, dtype=torch.long, device=device)
-        seqs = torch.cat([bos, sample.to(device)], dim=1)
+        # 1) Build the input_ids with start token + clamped sample
+        start   = torch.full((N, 1), self.start_token, dtype=torch.long, device=device)
+        seq = sample.clone().to(device)
+        seq[seq == -1] = self.pad_token
 
-        ds = TensorDataset(seqs, seqs)
-        loader = DataLoader(ds, batch_size=batch_size)
+        input_ids = torch.cat([start, seq], dim=1)  # (N, L+1)
+        attn_mask = (input_ids != self.pad_token).long()
+
+        dataset    = TensorDataset(input_ids, attn_mask)
+        dataloader = DataLoader(dataset, batch_size=batch_size)
 
         all_logp = []
-        for inp, lbl in loader:
-            inp, lbl = inp.to(device), lbl.to(device)
-            labels = self._mask_labels(lbl)
-            outputs = self.model(input_ids=inp, labels=labels)
-            # get logits for all but last
-            logits = outputs.logits[:, :-1, :]
-            target = inp[:, 1:]
-            # compute tokenwise log-probs
-            logp = -F.cross_entropy(
-                logits.reshape(-1, logits.size(-1)),
-                target.reshape(-1),
-                reduction="none",
+        for batch_ids, batch_mask in dataloader:
+            batch_ids   = batch_ids.to(device)
+            batch_mask  = batch_mask.to(device)
+
+            labels = batch_ids.clone()                
+            labels[labels == self.start_token] = -100 
+            labels[labels == self.pad_token]   = -100
+            labels[labels == self.end_token]   = -100
+
+            # 3) Forward to get loss and logits
+            outputs = self.model(
+                input_ids=batch_ids,
+                attention_mask=batch_mask,
+                labels=labels,
             )
-            # sum per sequence
-            logp = logp.reshape(inp.size(0), -1).sum(dim=1)
+
+            shift_logits = outputs.logits[:, :-1, :]
+            shift_labels = labels[:, 1:]
+
+            flat_logits = shift_logits.reshape(-1, shift_logits.size(-1))
+            flat_labels = shift_labels.reshape(-1)
+
+            logp = -F.cross_entropy(
+                flat_logits,
+                flat_labels,
+                reduction="none",
+                ignore_index=-100,
+            )
+            logp = logp.reshape(batch_ids.size(0), -1).sum(dim=1)  # (B,)
             all_logp.append(logp.cpu())
 
         return torch.cat(all_logp, dim=0)
+
+
+
+    # @torch.no_grad()
+    # def log_probs(self, sample, batch_size=256, device="cuda"):
+    #     self.model.eval()
+    #     self.model.to(device)
+    #     N = sample.shape[0]
+
+    #     start = torch.full((N, 1), self.start_token, dtype=torch.long, device=device)
+    #     seqs = torch.cat([start, sample.to(device)], dim=1)  # (N, seq_len+1)
+    #     dataset = TensorDataset(seqs)
+    #     dataloader = DataLoader(dataset, batch_size=batch_size)
+
+    #     log_probs = []
+
+    #     for inp, lbl in dataloader:
+    #         inp, lbl = inp.to(device), lbl.to(device)
+    #         labels = self._mask_labels(lbl)
+    #         outputs = self.model(input_ids=inp, labels=labels)
+
+    #         logits = outputs.logits[:, :-1, :]
+    #         target = inp[:, 1:]
+
+    #         logp = -F.cross_entropy(
+    #             logits.reshape(-1, logits.size(-1)),
+    #             target.reshape(-1),
+    #             reduction="none",
+    #         )
+    #         # sum per sequence
+    #         logp = logp.reshape(inp.size(0), -1).sum(dim=1)
+    #         log_probs.append(logp.cpu())
+
+    #     return torch.cat(log_probs, dim=0)
 
     @torch.no_grad()
     def per_token_preds(self, seq, device=None):
