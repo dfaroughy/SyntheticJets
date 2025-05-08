@@ -79,21 +79,22 @@ class JetSequence:
 
         print(f"INFO: start token: {self.start_token}")
         print(f"INFO: end token: {self.end_token}")
-        print(f"INFO: pad token: {self.pad_token}")
+        print(f"INFO: pad token: {self.pad_token}")            
+        self.data = self.get_data()  # shape (N, D, 3)
 
-                    
-    def map_to_sequence(self):
-
+    def get_data(self):
         with h5py.File(self.filepath, "r") as f:
             arr = f['discretized/block0_values']
             data = arr[:] if self.num_jets is None else arr[: self.num_jets]
                 
         df = pd.DataFrame(data)
         x = df.to_numpy() 
-        x = x.reshape(x.shape[0], -1, self.num_features)
-        N, D, _ = x.shape
+        return x.reshape(x.shape[0], -1, self.num_features)   
 
-        seq = self.bins_to_seq_encoding(x)
+    def map_to_sequence(self):
+        N, D, _ = self.data.shape
+        seq = self.bins_to_seq_encoding(self.data)
+
         if self.start_token is not None:
             start = np.full((N, 1), self.start_token)
             seq = np.concatenate((start, seq), axis=1) 
@@ -113,7 +114,6 @@ class JetSequence:
         Decode a 1-D sequence of token IDs back into bin triplets ids (a,b,c).
         """
         pt, eta, phi = self.bins
-        eta_phi = eta * phi
         a = seq // (eta * phi)
         rem = seq % (eta * phi)
         b = rem // phi

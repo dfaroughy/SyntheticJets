@@ -1,7 +1,15 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import torch
+
+import awkward as ak
+import vector
+import fastjet
 from sklearn.metrics import roc_curve, auc
+vector.register_awkward()
+
+
 
 def ROC(LLR_bckg, LLR_sig, label):
     """
@@ -203,3 +211,137 @@ def ordered_z_plots(toy_qcd, gen_jets, save_file='ordered_z_plots.png', feat=0):
     plt.savefig(save_file, dpi=300, bbox_inches='tight')
 
     plt.show()
+
+
+
+def make_continuous(jets):
+    pt_bins = np.load("data/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
+    eta_bins = np.load("data/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
+    phi_bins = np.load("data/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
+
+    pt_disc = jets[:, :, 0]
+    eta_disc = jets[:, :, 1]
+    phi_disc = jets[:, :, 2]
+
+    mask = pt_disc < 0
+
+    # pt_con = pt_disc * (pt_bins[1] - pt_bins[0]) + pt_bins[0]
+    # eta_con = eta_disc * (eta_bins[1] - eta_bins[0]) + eta_bins[0]
+    # phi_con = phi_disc * (phi_bins[1] - phi_bins[0]) + phi_bins[0]
+
+    pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * (
+        pt_bins[1] - pt_bins[0]
+    ) + pt_bins[0]
+
+    eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * (
+        eta_bins[1] - eta_bins[0]
+    ) + eta_bins[0]
+    
+    phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * (
+        phi_bins[1] - phi_bins[0]
+    ) + phi_bins[0]
+
+    continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
+    continues_jets[mask] = 0
+
+    return torch.tensor(continues_jets)
+
+
+class JetSubstructure:
+    def __init__(self, constituents, R=0.8, beta=1.0, use_wta_scheme=True):
+
+        pt = constituents[...,0] 
+        eta = constituents[...,1]
+        phi = constituents[...,2]
+
+        constituents_ak = ak.zip(
+            {
+                "pt": np.array(pt),
+                "eta": np.array(eta),
+                "phi": np.array(phi),
+                "mass": np.zeros_like(np.array(pt)),
+            },
+            with_name="Momentum4D",
+        )
+
+        constituents_ak = ak.mask(constituents_ak, constituents_ak.pt > 0)
+        constituents_ak = ak.drop_none(constituents_ak)
+
+        self._constituents_ak = constituents_ak[ak.num(constituents_ak) >= 3]
+
+        if use_wta_scheme:
+            jetdef = fastjet.JetDefinition(
+                fastjet.kt_algorithm, R, fastjet.WTA_pt_scheme
+            )
+        else:
+            jetdef = fastjet.JetDefinition(fastjet.kt_algorithm, R)
+
+        print("Clustering jets with fastjet")
+        print("Jet definition:", jetdef)
+        print("Calculating N-subjettiness")
+
+        self._cluster = fastjet.ClusterSequence(self._constituents_ak, jetdef)
+        self.d0 = self._calc_d0(R, beta)
+        self.c1 = self._cluster.exclusive_jets_energy_correlator(njets=1, func="c1")
+        self.d2 = self._cluster.exclusive_jets_energy_correlator(njets=1, func="d2")
+        self.tau1 = self._calc_tau1(beta)
+        self.tau2 = self._calc_tau2(beta)
+        self.tau3 = self._calc_tau3(beta)
+        self.tau21 = np.ma.divide(self.tau2, self.tau1)
+        self.tau32 = np.ma.divide(self.tau3, self.tau2)
+
+    def _calc_deltaR(self, particles, jet):
+        jet = ak.unflatten(ak.flatten(jet), counts=1)
+        return particles.deltaR(jet)
+
+    def _calc_d0(self, R, beta):
+        """Calculate the d0 values."""
+        return ak.sum(self._constituents_ak.pt * R**beta, axis=1)
+
+    def _calc_tau1(self, beta):
+        """Calculate the tau1 values."""
+        excl_jets_1 = self._cluster.exclusive_jets(n_jets=1)
+        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_1[:, :1])
+        pt_i = self._constituents_ak.pt
+        return ak.sum(pt_i * delta_r_1i**beta, axis=1) / self.d0
+
+    def _calc_tau2(self, beta):
+        """Calculate the tau2 values."""
+        excl_jets_2 = self._cluster.exclusive_jets(n_jets=2)
+        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_2[:, :1])
+        delta_r_2i = self._calc_deltaR(self._constituents_ak, excl_jets_2[:, 1:2])
+        pt_i = self._constituents_ak.pt
+
+        # add new axis to make it broadcastable
+        min_delta_r = ak.min(
+            ak.concatenate(
+                [
+                    delta_r_1i[..., np.newaxis] ** beta,
+                    delta_r_2i[..., np.newaxis] ** beta,
+                ],
+                axis=-1,
+            ),
+            axis=-1,
+        )
+        return ak.sum(pt_i * min_delta_r, axis=1) / self.d0
+
+    def _calc_tau3(self, beta):
+        """Calculate the tau3 values."""
+        excl_jets_3 = self._cluster.exclusive_jets(n_jets=3)
+        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, :1])
+        delta_r_2i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, 1:2])
+        delta_r_3i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, 2:3])
+        pt_i = self._constituents_ak.pt
+
+        min_delta_r = ak.min(
+            ak.concatenate(
+                [
+                    delta_r_1i[..., np.newaxis] ** beta,
+                    delta_r_2i[..., np.newaxis] ** beta,
+                    delta_r_3i[..., np.newaxis] ** beta,
+                ],
+                axis=-1,
+            ),
+            axis=-1,
+        )
+        return ak.sum(pt_i * min_delta_r, axis=1) / self.d0
