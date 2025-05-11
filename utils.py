@@ -345,3 +345,209 @@ class JetSubstructure:
             axis=-1,
         )
         return ak.sum(pt_i * min_delta_r, axis=1) / self.d0
+
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.gridspec import GridSpec
+
+def plot_hl_with_ratio(test, gen, aachen, bins, ylims, jet='jetclass'):
+    """
+    Plot 4 seaborn histograms of jet high-level features (hard‑coded) with ratio panels below.
+
+    Parameters
+    ----------
+    tops_HL_test, tops_HL_gen, tops_HL_aachen : np.ndarray
+        Arrays of shape (N, 4), where columns are [pT, eta, phi, m].
+    """
+
+    fig = plt.figure(figsize=(12, 2.5))
+    gs = GridSpec(2, 4, height_ratios=(3,1), hspace=0.1, wspace=0.3)
+
+    # --- TOP ROW: Hard‑coded histplots ---
+    
+    ax0 = fig.add_subplot(gs[0,0])
+    sns.histplot(test[...,0],bins=bins[0],lw=0.4,fill=True,  color='k', alpha=0.2,  label=jet, element='step', stat='density', ax=ax0)
+    sns.histplot(gen[...,0], bins=bins[0], lw=0.8, fill=False, color='crimson', label='GPT2 Rutgers',element='step', stat='density', ax=ax0)
+    sns.histplot(aachen[...,0], bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
+    ax0.set_ylabel('density', fontsize=12)
+    ax0.set_ylim(0, ylims[0])
+    ax0.legend(fontsize=7)
+
+    ax1 = fig.add_subplot(gs[0,1])
+    sns.histplot(test[...,1], bins=bins[1], lw=0.4, fill=True,  color='k', alpha=0.2,  element='step', stat='density', ax=ax1)
+    sns.histplot(gen[...,1],  bins=bins[1], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax1)
+    sns.histplot(aachen[...,1], bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
+    ax1.set_ylabel(' ', fontsize=12)
+    ax1.set_ylim(0, ylims[1])
+
+    ax2 = fig.add_subplot(gs[0,2])
+    sns.histplot(test[...,2], bins=bins[2], lw=0.4, fill=True,  color='k',  alpha=0.2, element='step', stat='density', ax=ax2)
+    sns.histplot(gen[...,2],  bins=bins[2], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax2)
+    sns.histplot(aachen[...,2], bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
+    ax2.set_ylabel(' ', fontsize=12)
+    ax2.set_ylim(0, ylims[2])
+
+    ax3 = fig.add_subplot(gs[0,3])
+    sns.histplot(test[...,3], bins=bins[3], lw=0.4, fill=True,  color='k', alpha=0.2,element='step', stat='density', ax=ax3)
+    sns.histplot(gen[...,3],  bins=bins[3], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax3)
+    sns.histplot(aachen[...,3], bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
+    ax3.set_ylabel(' ', fontsize=12)
+    ax3.set_ylim(0, ylims[3])
+
+    # --- BOTTOM ROW: Ratio panels ---
+
+    h0_t, e0 = np.histogram(test[...,0], bins=bins[0],      density=True)
+    h0_g, _  = np.histogram(gen[...,0],  bins=e0,         density=True)
+    h0_a, _  = np.histogram(aachen[...,0], bins=e0,       density=True)
+    centers0 = 0.5*(e0[:-1] + e0[1:])
+
+    ax0r = fig.add_subplot(gs[1,0], sharex=ax0)
+    ax0r.step(centers0, h0_g/(h0_t+1e-8), where='mid', color='crimson', lw=1)
+    ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
+    ax0r.set_ylim(0.5,1.5)
+    ax0r.set_xlabel(r'jet $p_T$')
+    ax0r.set_ylabel('ratio', fontsize=8)
+    ax0r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+
+    h1_t, e1 = np.histogram(test[...,1], bins=bins[1],      density=True)
+    h1_g, _  = np.histogram(gen[...,1],  bins=e1,         density=True)
+    h1_a, _  = np.histogram(aachen[...,1], bins=e1,       density=True)
+    centers1 = 0.5*(e1[:-1] + e1[1:])
+
+    ax1r = fig.add_subplot(gs[1,1], sharex=ax1)
+    ax1r.step(centers1, h1_g/(h1_t+1e-8), where='mid', color='crimson', lw=1)
+    ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid', lw=1)
+    ax1r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax1r.set_ylim(0.5,1.5)
+    ax1r.set_xlabel(r'jet $\eta$')
+
+
+    h2_t, e2 = np.histogram(test[...,2], bins=bins[2],      density=True)
+    h2_g, _  = np.histogram(gen[...,2],  bins=e2,         density=True)
+    h2_a, _  = np.histogram(aachen[...,2], bins=e2,       density=True)
+    centers2 = 0.5*(e2[:-1] + e2[1:])
+
+    ax2r = fig.add_subplot(gs[1,2], sharex=ax2)
+    ax2r.step(centers2, h2_g/(h2_t+1e-8), where='mid', color='crimson',lw=1)
+    ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
+    ax2r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax2r.set_ylim(0.5,1.5)
+    ax2r.set_xlabel(r'jet $\phi$')
+
+    h3_t, e3 = np.histogram(test[...,3], bins=bins[3],      density=True)
+    h3_g, _  = np.histogram(gen[...,3],  bins=e3,         density=True)
+    h3_a, _  = np.histogram(aachen[...,3], bins=e3,       density=True)
+    centers3 = 0.5*(e3[:-1] + e3[1:])
+
+    ax3r = fig.add_subplot(gs[1,3], sharex=ax3)
+    ax3r.step(centers3, h3_g/(h3_t+1e-8), where='mid',color='crimson',lw=1)
+    ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
+    ax3r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax3r.set_ylim(0.5,1.5)
+    ax3r.set_xlabel(r'jet mass')
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+def plot_substructure_with_ratio(test, gen, aachen, bins, ylims, jet='jetclass' ):
+    """
+    Plot 4 seaborn histograms of jet high-level features (hard‑coded) with ratio panels below.
+
+    Parameters
+    ----------
+    tops_HL_test, tops_HL_gen, tops_HL_aachen : np.ndarray
+        Arrays of shape (N, 4), where columns are [pT, eta, phi, m].
+    """
+
+    fig = plt.figure(figsize=(12, 2.5))
+    gs = GridSpec(2, 4, height_ratios=(3,1), hspace=0.1, wspace=0.3)
+
+    # --- TOP ROW: Hard‑coded histplots ---
+    ax0 = fig.add_subplot(gs[0,0])
+    sns.histplot(test.c1, bins=bins[0],lw=0.4,fill=True,  color='k', alpha=0.2,  label=jet, element='step', stat='density', ax=ax0)
+    sns.histplot(gen.c1, bins=bins[0], lw=0.8, fill=False, color='crimson', label='GPT2 Rutgers',element='step', stat='density', ax=ax0)
+    sns.histplot(aachen.c1, bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
+    ax0.set_ylabel('density', fontsize=12)
+    ax0.set_ylim(0, ylims[0])
+    ax0.legend(fontsize=7)
+
+    ax1 = fig.add_subplot(gs[0,1])
+    sns.histplot(test.d2, bins=bins[1], lw=0.4, fill=True,  color='k', alpha=0.2,  element='step', stat='density', ax=ax1)
+    sns.histplot(gen.d2,  bins=bins[1], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax1)
+    sns.histplot(aachen.d2, bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
+    ax1.set_ylabel(' ', fontsize=12)
+    ax1.set_ylim(0, ylims[1])
+
+    ax2 = fig.add_subplot(gs[0,2])
+    sns.histplot(test.tau21, bins=bins[2], lw=0.4, fill=True,  color='k',  alpha=0.2, element='step', stat='density', ax=ax2)
+    sns.histplot(gen.tau21,  bins=bins[2], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax2)
+    sns.histplot(aachen.tau21, bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
+    ax2.set_ylabel(' ', fontsize=12)
+    ax2.set_ylim(0, ylims[2])
+
+    ax3 = fig.add_subplot(gs[0,3])
+    sns.histplot(test.tau32, bins=bins[3], lw=0.4, fill=True,  color='k', alpha=0.2,element='step', stat='density', ax=ax3)
+    sns.histplot(gen.tau32,  bins=bins[3], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax3)
+    sns.histplot(aachen.tau32, bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
+    ax3.set_ylabel(' ', fontsize=12)
+    ax3.set_ylim(0, ylims[3])
+    
+    # --- BOTTOM ROW: Ratio panels ---
+
+    h0_t, e0 = np.histogram(test.c1, bins=bins[0],      density=True)
+    h0_g, _  = np.histogram(gen.c1,  bins=e0,         density=True)
+    h0_a, _  = np.histogram(aachen.c1, bins=e0,       density=True)
+    centers0 = 0.5*(e0[:-1] + e0[1:])
+
+    ax0r = fig.add_subplot(gs[1,0], sharex=ax0)
+    ax0r.step(centers0, h0_g/(h0_t+1e-8), where='mid', color='crimson', lw=1)
+    ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
+    ax0r.set_ylim(0.5,1.5)
+    ax0r.set_xlabel(r'$C_1$')
+    ax0r.set_ylabel('ratio', fontsize=8)
+    ax0r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+
+    h1_t, e1 = np.histogram(test.d2, bins=bins[1],      density=True)
+    h1_g, _  = np.histogram(gen.d2,  bins=e1,         density=True)
+    h1_a, _  = np.histogram(aachen.d2, bins=e1,       density=True)
+    centers1 = 0.5*(e1[:-1] + e1[1:])
+
+    ax1r = fig.add_subplot(gs[1,1], sharex=ax1)
+    ax1r.step(centers1, h1_g/(h1_t+1e-8), where='mid', color='crimson', lw=1)
+    ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid', lw=1)
+    ax1r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax1r.set_ylim(0.5,1.5)
+    ax1r.set_xlabel(r'$D_2$')
+
+
+    h2_t, e2 = np.histogram(test.tau21, bins=bins[2],      density=True)
+    h2_g, _  = np.histogram(gen.tau21,  bins=e2,         density=True)
+    h2_a, _  = np.histogram(aachen.tau21, bins=e2,       density=True)
+    centers2 = 0.5*(e2[:-1] + e2[1:])
+
+    ax2r = fig.add_subplot(gs[1,2], sharex=ax2)
+    ax2r.step(centers2, h2_g/(h2_t+1e-8), where='mid', color='crimson',lw=1)
+    ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
+    ax2r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax2r.set_ylim(0.5,1.5)
+    ax2r.set_xlabel(r'$\tau_{21}$')
+
+    h3_t, e3 = np.histogram(test.tau32, bins=bins[3],      density=True)
+    h3_g, _  = np.histogram(gen.tau32,  bins=e3,         density=True)
+    h3_a, _  = np.histogram(aachen.tau32, bins=e3,       density=True)
+    centers3 = 0.5*(e3[:-1] + e3[1:])
+
+    ax3r = fig.add_subplot(gs[1,3], sharex=ax3)
+    ax3r.step(centers3, h3_g/(h3_t+1e-8), where='mid',color='crimson',lw=1)
+    ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
+    ax3r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax3r.set_ylim(0.5,1.5)
+    ax3r.set_xlabel(r'$\tau_{32}$')
+
+    plt.tight_layout()
+    plt.show()
