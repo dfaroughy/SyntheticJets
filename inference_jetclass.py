@@ -1,89 +1,33 @@
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
 import pytorch_lightning as L
+from argparse import ArgumentParser
 
 from torch.utils.data import DataLoader
-from synthetic_data import SyntheticJets
-from utils import kin_plots,  ordered_z_plots, ROC
 from models import JetGPT2Model
 
 ###############################################################################
-N = 100000   # num gen jets
-tag = 'fine'
-signal_id = "44435059d9624828a240bc94a32f7214"        # comet run folder
-background_id = "e3e5072962ba4dde81b96c7090da422e"    # comet run folder
-path = "/pscratch/sd/d/dfarough/synthetic-jets/"
+parser = ArgumentParser()
+
+parser.add_argument("--dir", type=str, default='/pscratch/sd/d/dfarough')
+parser.add_argument("--project_name", "-proj", type=str, default='tokenized-jets')
+parser.add_argument("--experiment_id", "-id", type=str, default=None)
+parser.add_argument("--jet_type", "-type", type=str, default=None)
+parser.add_argument("--top_k", type=int, default=5000)
+parser.add_argument("--num_jets", "-n", type=int, default=1000000)
+parser.add_argument("--batch_size", "-bs", type=int, default=1024)
+
+args = parser.parse_args()
 ###############################################################################
 
-#...Signal
+model = JetGPT2Model.load_from_checkpoint(f"{args.dir}/{args.project_name}/{args.experiment_id}/checkpoints/best.ckpt")
+model.top_k = args.top_k  
 
-#...load ckpt and generate data from pretrained GPT2
-
-sig_gpt2 = JetGPT2Model.load_from_checkpoint(f"{path}/{signal_id}/checkpoints/best.ckpt")
-sig_gpt2.top_k = sig_gpt2.start_token # remove top_k default cut
-prompts = torch.full((N, 1), sig_gpt2.start_token, dtype=torch.long, device=sig_gpt2.device)
-prompt_dataloadeer = DataLoader(prompts, batch_size=1024, shuffle=False)
-
+prompts = torch.full((args.num_jets, 1), model.start_token, dtype=torch.long, device=model.device)
+prompt_dataloadeer = DataLoader(prompts, batch_size=args.batch_size, shuffle=False, num_workers=16, pin_memory=True)
 
 generator = L.Trainer(accelerator="gpu", devices=[0])
-sig_gen_seq = generator.predict(sig_gpt2, dataloaders=prompt_dataloadeer)
-sig_gen_seq = torch.cat(sig_gen_seq, dim=0)
-sig_gen_bin = sig_gpt2.synthetic_jets.tokens_to_bins(sig_gen_seq)  # binned jet 
+gen_seq = generator.predict(model, dataloaders=prompt_dataloadeer)
+gen_seq = torch.cat(gen_seq, dim=0)
 
-
-# #############################################
-
-# #...Background
-
-# #...load ckpt and generate data from pretrained GPT2
-
-# bkg_gpt2 = GPT2Model.load_from_checkpoint(f"{path}/{background_id}/checkpoints/best.ckpt")
-# bkg_gpt2.top_k = bkg_gpt2.start_token # remove top_k default cut
-# prompts = torch.full((N, 1), bkg_gpt2.start_token, dtype=torch.long, device=bkg_gpt2.device)
-# prompt_dataloadeer = DataLoader(prompts, batch_size=1024, shuffle=False)
-
-# generator = L.Trainer(accelerator="gpu", devices=[0])
-# bkg_gen_seq = generator.predict(bkg_gpt2, dataloaders=prompt_dataloadeer)
-# bkg_gen_seq = torch.cat(bkg_gen_seq, dim=0)
-# bkg_gen_bin = bkg_gpt2.synthetic_jets.tokens_to_bins(bkg_gen_seq)  # binned jet 
-# np.save(f'{path}{background_id}/bkg_gen_data_gpt2.npy', bkg_gen_bin)
-
-# #...get ref data
-
-# data = SyntheticJets(shape_param=bkg_gpt2.shape, 
-#                     scale_param=bkg_gpt2.scale, 
-#                     bins_z= bkg_gpt2.bins_z,
-#                     bins_phi=bkg_gpt2.bins_phi,
-#                     z_order=True,
-#                     tokenize=True,
-#                     )
-
-# jet_seq  = data.sample(N=N)  # tokenized jet
-# jet_bin = data.tokens_to_bins(jet_seq)  # binned jet 
-
-# #...make plots
-
-# kin_plots(jet_bin, bkg_gen_bin, f"{path}{background_id}/kinematics.png")
-# ordered_z_plots(jet_bin, bkg_gen_bin, f"{path}{background_id}/ordered_z.png")
-
-# ############################################# 
- 
-# #...ROC curve
-
-# bkg_logp_on_qcd = bkg_gpt2.log_probs(bkg_gen_seq, batch_size=1024)
-# bkg_logp_on_tops = bkg_gpt2.log_probs(sig_gen_seq, batch_size=1024)
-# sig_logp_on_qcd = sig_gpt2.log_probs(bkg_gen_seq, batch_size=1024)
-# sig_logp_on_tops = sig_gpt2.log_probs(sig_gen_seq, batch_size=1024)
-
-# LLR_qcd = bkg_logp_on_tops - sig_logp_on_tops     
-# LLR_tops = bkg_logp_on_qcd - sig_logp_on_qcd  
-
-# optimal_LLR_qcd = np.nan_to_num(np.load(f"{path}/data/LLR_data_bkg.npy"), nan=0.0)
-# optimal_LLR_tops = np.nan_to_num(np.load(f"{path}/data/LLR_data_sig.npy"), nan=0.0)
-
-# plt.figure(figsize=(3, 3))
-# ROC(optimal_LLR_qcd, optimal_LLR_tops, "optimal data")
-# ROC(LLR_qcd, LLR_tops, "optimal GPT2")
-# plt.legend(fontsize=6, loc="lower left")
-# plt.savefig(f'ROC_{tag}.png', dpi=300, bbox_inches='tight')
+np.save(f'{args.dir}/{args.project_name}/{args.experiment_id}/gen_{args.jet_type}_seq_top{args.top_k}_jets{args.num_jets}.npy', gen_seq)

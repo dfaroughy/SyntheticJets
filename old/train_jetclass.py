@@ -9,35 +9,32 @@ from models import JetGPT2Model
 from synthetic_data import JetSequenceDataset
 
 ##########################################################################
-jet_type = 'TTBar'
-num_nodes = 4
-tags = [jet_type, 'perlmutter']
+tags = ['ZJetsToNuNu', 'pascal2']
 bins            = [41, 31, 31]
-batch_size      = 128
-n_embd          = 256
-n_inner         = 1024
-n_layer         = 8
+batch_size      = 32
+n_embd          = 128
+n_layer         = 4
 n_head          = 4
-lr              = 5e-4
-lr_final        = 1e-6
-max_epochs      = 16
+lr              = 1e-3
+max_epochs      = 500
 ##########################################################################
 
 logger = CometLogger(
     api_key='8ONjCXJ1ogsqG1UxQzKxYn7tz',
     project_name='tokenized-jets',
     workspace='dfaroughy',
-    save_dir='/pscratch/sd/d/dfarough'
+    save_dir='/home/df630/SyntheticJets/experiments/results/comet'
 )
-
 logger.experiment.add_tags(tags)
 
 train_dataset = JetSequenceDataset(
-    filepath=f"/pscratch/sd/d/dfarough/tokenized-jets/{jet_type}_train___1Mfromeach_403030.h5",
+    filepath="data/ZJetsToNuNu_train___1Mfromeach_403030.h5",
+    num_jets=100_000,
 )
 
 val_dataset = JetSequenceDataset(
-    filepath=f"/pscratch/sd/d/dfarough/tokenized-jets/{jet_type}_val___1Mfromeach_403030.h5",
+    filepath="data/ZJetsToNuNu_val___1Mfromeach_403030.h5",
+    num_jets=10_000,
 )
 
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -45,7 +42,6 @@ val_loader   = DataLoader(val_dataset,   batch_size=batch_size, shuffle=False)
 
 model = JetGPT2Model(
     n_embd=n_embd,
-    n_inner=n_inner,
     n_layer=n_layer,
     n_head=n_head,
     learning_rate=lr,
@@ -54,9 +50,8 @@ model = JetGPT2Model(
 trainer = L.Trainer(
     max_epochs=max_epochs,
     accelerator='gpu',
-    devices='auto',
-    strategy='ddp',
-    num_nodes=num_nodes,
+    devices=[0,1,2,3],
+    strategy='auto',
     callbacks=[
         L.callbacks.ModelCheckpoint(
             dirpath=None,
@@ -68,6 +63,7 @@ trainer = L.Trainer(
         )
     ],
     logger=logger,
+    precision=16,
     sync_batchnorm=True,
     gradient_clip_val=1.0,
 )

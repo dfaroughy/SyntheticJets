@@ -155,11 +155,11 @@ class JetGPT2Model(L.LightningModule):
 
     @torch.no_grad()
     def log_probs(self, sample, batch_size=256, device="cuda"):
+
         self.model.eval()
         self.model.to(device)
         N = sample.shape[0]
 
-        # 1) Build the input_ids with start token + clamped sample
         start   = torch.full((N, 1), self.start_token, dtype=torch.long, device=device)
         seq = sample.clone().to(device)
         seq[seq == -1] = self.pad_token
@@ -171,6 +171,7 @@ class JetGPT2Model(L.LightningModule):
         dataloader = DataLoader(dataset, batch_size=batch_size)
 
         all_logp = []
+
         for batch_ids, batch_mask in dataloader:
             batch_ids   = batch_ids.to(device)
             batch_mask  = batch_mask.to(device)
@@ -180,12 +181,10 @@ class JetGPT2Model(L.LightningModule):
             labels[labels == self.pad_token]   = -100
             labels[labels == self.end_token]   = -100
 
-            # 3) Forward to get loss and logits
-            outputs = self.model(
-                input_ids=batch_ids,
-                attention_mask=batch_mask,
-                labels=labels,
-            )
+            outputs = self.model(input_ids=batch_ids,
+                                 attention_mask=batch_mask,
+                                 labels=labels,
+                                )
 
             shift_logits = outputs.logits[:, :-1, :]
             shift_labels = labels[:, 1:]
@@ -193,12 +192,11 @@ class JetGPT2Model(L.LightningModule):
             flat_logits = shift_logits.reshape(-1, shift_logits.size(-1))
             flat_labels = shift_labels.reshape(-1)
 
-            logp = -F.cross_entropy(
-                flat_logits,
-                flat_labels,
-                reduction="none",
-                ignore_index=-100,
-            )
+            logp = -F.cross_entropy(flat_logits,
+                                    flat_labels,
+                                    reduction="none",
+                                    ignore_index=-100,
+                                    )
             logp = logp.reshape(batch_ids.size(0), -1).sum(dim=1)  # (B,)
             all_logp.append(logp.cpu())
 
