@@ -374,6 +374,7 @@ class SyntheticJetGPT2Model(L.LightningModule):
                                 top_k = self.top_k,
                                 bos_token_id=self.start_token,
                                 pad_token_id=self.start_token + 1,
+                                synced_gpus=True
                                 )
 
         seq = seq.detach().cpu()

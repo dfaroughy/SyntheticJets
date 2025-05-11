@@ -59,7 +59,7 @@ class JetSequenceDataset(Dataset):
 class JetSequence:
     def __init__(
         self,
-        filepath: str,
+        filepath: str=None,
         num_jets: int = None,
         max_seq_length: int = 200,  # dataset max num consituents
         bins: list = [41, 31, 31],
@@ -79,8 +79,9 @@ class JetSequence:
 
         print(f"INFO: start token: {self.start_token}")
         print(f"INFO: end token: {self.end_token}")
-        print(f"INFO: pad token: {self.pad_token}")            
-        self.data = self.get_data()  # shape (N, D, 3)
+        print(f"INFO: pad token: {self.pad_token}") 
+        if filepath is not None:           
+            self.data = self.get_data()  # shape (N, D, 3)
 
     def get_data(self):
         with h5py.File(self.filepath, "r") as f:
