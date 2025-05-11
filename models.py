@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import torch.nn.functional as F
 
 from transformers import GPT2LMHeadModel, GPT2Config
-from synthetic_data import SyntheticJets
+from datamodule_synthetic_jets import SyntheticJets
 
 
 class JetGPT2Model(L.LightningModule):

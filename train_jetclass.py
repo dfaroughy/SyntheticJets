@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from argparse import ArgumentParser
 
 from models import JetGPT2Model
-from synthetic_data import JetSequenceDataset
+from datamodule_jetclass import JetSequenceDataset
 
 ##########################################################################
 parser = ArgumentParser()

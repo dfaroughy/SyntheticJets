@@ -24,7 +24,7 @@ model = JetGPT2Model.load_from_checkpoint(f"{args.dir}/{args.project_name}/{args
 model.top_k = args.top_k  
 
 prompts = torch.full((args.num_jets, 1), model.start_token, dtype=torch.long, device=model.device)
-prompt_dataloadeer = DataLoader(prompts, batch_size=args.batch_size, shuffle=False, num_workers=16, pin_memory=True)
+prompt_dataloadeer = DataLoader(prompts, batch_size=args.batch_size, shuffle=False)
 
 generator = L.Trainer(accelerator="gpu", devices=[0])
 gen_seq = generator.predict(model, dataloaders=prompt_dataloadeer)
