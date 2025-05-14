@@ -1,14 +1,461 @@
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-import torch
 
+import numpy as np
+import pandas as pd
+import torch
+import os
+from pathlib import Path
 import awkward as ak
 import vector
 import fastjet
+import yaml
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+import seaborn as sns
+
+from pytorch_lightning.callbacks import Callback
+from lightning.pytorch.utilities import rank_zero_only
 from sklearn.metrics import roc_curve, auc
+
+from datamodule_jetclass import JetSequence
+
 vector.register_awkward()
 
+
+class JetSubstructure:
+    def __init__(self, constituents, R=0.8, beta=1.0, use_wta_scheme=True):
+
+        pt = constituents[...,0] 
+        eta = constituents[...,1]
+        phi = constituents[...,2]
+
+        constituents_ak = ak.zip(
+            {
+                "pt": np.array(pt),
+                "eta": np.array(eta),
+                "phi": np.array(phi),
+                "mass": np.zeros_like(np.array(pt)),
+            },
+            with_name="Momentum4D",
+        )
+
+        constituents_ak = ak.mask(constituents_ak, constituents_ak.pt > 0)
+        constituents_ak = ak.drop_none(constituents_ak)
+
+        self._constituents_ak = constituents_ak[ak.num(constituents_ak) >= 3]
+
+        if use_wta_scheme:
+            jetdef = fastjet.JetDefinition(
+                fastjet.kt_algorithm, R, fastjet.WTA_pt_scheme
+            )
+        else:
+            jetdef = fastjet.JetDefinition(fastjet.kt_algorithm, R)
+
+        print("Clustering jets with fastjet")
+        print("Jet definition:", jetdef)
+        print("Calculating N-subjettiness")
+
+        self._cluster = fastjet.ClusterSequence(self._constituents_ak, jetdef)
+        self.d0 = self._calc_d0(R, beta)
+        self.c1 = self._cluster.exclusive_jets_energy_correlator(njets=1, func="c1")
+        self.d2 = self._cluster.exclusive_jets_energy_correlator(njets=1, func="d2")
+        self.tau1 = self._calc_tau1(beta)
+        self.tau2 = self._calc_tau2(beta)
+        self.tau3 = self._calc_tau3(beta)
+        self.tau21 = np.ma.divide(self.tau2, self.tau1)
+        self.tau32 = np.ma.divide(self.tau3, self.tau2)
+
+    def _calc_deltaR(self, particles, jet):
+        jet = ak.unflatten(ak.flatten(jet), counts=1)
+        return particles.deltaR(jet)
+
+    def _calc_d0(self, R, beta):
+        """Calculate the d0 values."""
+        return ak.sum(self._constituents_ak.pt * R**beta, axis=1)
+
+    def _calc_tau1(self, beta):
+        """Calculate the tau1 values."""
+        excl_jets_1 = self._cluster.exclusive_jets(n_jets=1)
+        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_1[:, :1])
+        pt_i = self._constituents_ak.pt
+        return ak.sum(pt_i * delta_r_1i**beta, axis=1) / self.d0
+
+    def _calc_tau2(self, beta):
+        """Calculate the tau2 values."""
+        excl_jets_2 = self._cluster.exclusive_jets(n_jets=2)
+        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_2[:, :1])
+        delta_r_2i = self._calc_deltaR(self._constituents_ak, excl_jets_2[:, 1:2])
+        pt_i = self._constituents_ak.pt
+
+        #...add new axis to make it broadcastable
+        min_delta_r = ak.min(
+            ak.concatenate(
+                [
+                    delta_r_1i[..., np.newaxis] ** beta,
+                    delta_r_2i[..., np.newaxis] ** beta,
+                ],
+                axis=-1,
+            ),
+            axis=-1,
+        )
+        return ak.sum(pt_i * min_delta_r, axis=1) / self.d0
+
+    def _calc_tau3(self, beta):
+        """Calculate the tau3 values."""
+        excl_jets_3 = self._cluster.exclusive_jets(n_jets=3)
+        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, :1])
+        delta_r_2i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, 1:2])
+        delta_r_3i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, 2:3])
+        pt_i = self._constituents_ak.pt
+
+        min_delta_r = ak.min(
+            ak.concatenate(
+                [
+                    delta_r_1i[..., np.newaxis] ** beta,
+                    delta_r_2i[..., np.newaxis] ** beta,
+                    delta_r_3i[..., np.newaxis] ** beta,
+                ],
+                axis=-1,
+            ),
+            axis=-1,
+        )
+        return ak.sum(pt_i * min_delta_r, axis=1) / self.d0
+
+
+class GeneratorCallback(Callback):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.experiment_dir = Path(f'{config.dir}/{config.project_name}/{config.experiment_id}')
+        self.jet_type = config.jet_type
+        self.max_seq_length = config.max_seq_length
+        self.file_name = f'gen_{config.jet_type}_seq_top{config.top_k}_jets{config.num_jets}'
+        self.data_dir = f'{config.dir}/JetClass' 
+
+    def on_predict_start(self, trainer, pl_module):
+        self.batched_data = []
+
+    def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        self.batched_data.append(outputs)
+
+    def on_predict_end(self, trainer, pl_module):
+        rank = trainer.global_rank
+
+        self._save_results_local(rank)
+        trainer.strategy.barrier()  # wait for all ranks to finish
+
+        if trainer.is_global_zero:
+            self._gather_results_global(trainer)
+            self._clean_temp_files()
+
+    def _save_results_local(self, rank):
+        data = torch.cat(self.batched_data, dim=0)
+        random = np.random.randint(0, 1000)
+        path = f"{self.experiment_dir}/temp_data_{rank}_{random}.pt"
+        torch.save(data, path)
+
+    @rank_zero_only
+    def _gather_results_global(self, trainer):
+        suffix = np.random.randint(0, 1000)
+        os.mkdir(f'{self.experiment_dir}/results_{suffix}')
+
+        with open(f'{self.experiment_dir}/results_{suffix}/configs.yaml' , 'w' ) as outfile:
+            yaml.dump( self.config.__dict__, outfile, sort_keys=False)
+
+        temp_files = self.experiment_dir.glob("temp_data_*_*.pt")
+        data_tokens = torch.cat([torch.load(str(f)) for f in temp_files], dim=0)
+        np.save(f'{self.experiment_dir}/results_{suffix}/{self.file_name}_tokens.npy', data_tokens)
+        print(f'\nINFO: generated {data_tokens.shape[0]} jet sequences')
+        print(f'INFO: data saved in {self.experiment_dir}/results_{suffix}')
+
+        Jets = JetSequence()
+
+        data_binned = make_continuous(Jets.seq_to_bins_decoding(data_tokens), self.data_dir)
+        np.save(f'{self.experiment_dir}/results_{suffix}/{self.file_name}_binned.npy', data_binned)
+        print(f'INFO: saved binned jets with shape {data_binned.shape}')
+
+        self._plot_results(data_binned, path=f'{self.experiment_dir}/results_{suffix}', N=100_000)
+
+
+    def _clean_temp_files(self):
+        for f in self.experiment_dir.glob("temp_data_*_*.pt"):
+            f.unlink()
+
+    def _plot_results(self, gen_binned, path, N=50_000):
+
+        gen = gen_binned[:N]
+
+        #...get test and Aachen data for comparison:
+
+        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5', )
+        test = make_continuous(torch.tensor(test_seq.data[:N]).long(), self.data_dir)
+        aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', )
+        aachen = make_continuous(torch.tensor(aachen_seq.data[:N]).long(), self.data_dir)
+
+        #...plot:
+
+        plot_kin_with_ratio(test, 
+                           gen, 
+                           aachen, 
+                           path=path + '/particle_level_obs.png', 
+                           jet=f'{self.jet_type}')
+
+        plot_hl_with_ratio(test, 
+                           gen, 
+                           aachen, 
+                           path=path + '/jet_level_obs.png',
+                           jet=f'{self.jet_type}')
+
+
+def make_continuous(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass'):
+    pt_bins = np.load(f"{bin_dir}/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
+    eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
+    phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
+
+    pt_disc = jets[:, :, 0]
+    eta_disc = jets[:, :, 1]
+    phi_disc = jets[:, :, 2]
+
+    mask = pt_disc < 0
+
+    pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * (
+        pt_bins[1] - pt_bins[0]
+    ) + pt_bins[0]
+
+    eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * (
+        eta_bins[1] - eta_bins[0]
+    ) + eta_bins[0]
+    
+    phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * (
+        phi_bins[1] - phi_bins[0]
+    ) + phi_bins[0]
+
+    continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
+    continues_jets[mask] = 0
+
+    return torch.tensor(continues_jets)
+
+
+def jets_HighLevelFeats(sample):
+    pt = sample[..., 0]
+    eta = sample[..., 1]
+    phi = sample[..., 2]
+
+    # px,py,pz:
+    px = pt * np.cos(phi)
+    py = pt * np.sin(phi)
+    pz = pt * np.sinh(eta)
+    E = pt * np.cosh(eta)
+
+    jet_4mom = np.stack([px, py, pz, E], axis=-1)
+    jet_4mom = jet_4mom.sum(axis=1)
+
+    # Calculate the invariant mass of the jets
+    jet_pt = np.sqrt(jet_4mom[..., 0]**2 + jet_4mom[..., 1]**2)
+    jet_eta = np.arcsinh(jet_4mom[..., 2] / jet_pt)
+    jet_phi = np.arctan2(jet_4mom[..., 1], jet_4mom[..., 0])
+    jet_mass = np.sqrt(np.maximum(0, jet_4mom[..., 3]**2 - (jet_4mom[..., 0]**2 + jet_4mom[..., 1]**2 + jet_4mom[..., 2]**2)))
+
+    return np.stack([jet_pt, jet_eta, jet_phi, jet_mass], axis=-1)
+
+
+def plot_kin_with_ratio(test, gen, aachen, path='results_plot.png', jet='jetclass'):
+
+    test = test.cpu().numpy()
+    gen = gen.cpu().numpy()
+    aachen = aachen.cpu().numpy()
+
+    bins = [np.arange(-1, 7, 0.2), 
+            np.arange(-1, 1, 0.05), 
+            np.arange(-1, 1, 0.05), 
+            np.arange(0, 128, 2)]
+
+    ylims = (0.4, 4.5, 4.5, 0.035)
+
+    fig = plt.figure(figsize=(12, 2.5))
+    gs = GridSpec(2, 4, height_ratios=(3,1), hspace=0.1, wspace=0.3)
+
+    # --- TOP ROW: Hard‑coded histplots ---
+    
+    ax0 = fig.add_subplot(gs[0,0])
+    sns.histplot(np.log(test[test[...,0]>0][...,0]),bins=bins[0],lw=0.4,fill=True,  color='k', alpha=0.2,  label=jet, element='step', stat='density', ax=ax0)
+    sns.histplot(np.log(gen[gen[...,0]>0][...,0]), bins=bins[0], lw=0.8, fill=False, color='crimson', label='GPT2 Rutgers',element='step', stat='density', ax=ax0)
+    sns.histplot(np.log(aachen[aachen[...,0]>0][...,0]), bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
+    ax0.set_ylabel('density', fontsize=12)
+    ax0.legend(fontsize=6)
+    ax0.set_ylim(0, ylims[0])
+
+    ax1 = fig.add_subplot(gs[0,1])
+    sns.histplot(test[test[...,0]>0][...,1], bins=bins[1], lw=0.4, fill=True,  color='k', alpha=0.2,  element='step', stat='density', ax=ax1)
+    sns.histplot(gen[gen[...,0]>0][...,1],  bins=bins[1], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax1)
+    sns.histplot(aachen[aachen[...,0]>0][...,1], bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
+    ax1.set_ylabel(' ', fontsize=12)
+    ax1.set_ylim(0, ylims[1])
+
+    ax2 = fig.add_subplot(gs[0,2])
+    sns.histplot(test[test[...,0]>0][...,2], bins=bins[2], lw=0.4, fill=True,  color='k',  alpha=0.2, element='step', stat='density', ax=ax2)
+    sns.histplot(gen[gen[...,0]>0][...,2],  bins=bins[2], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax2)
+    sns.histplot(aachen[aachen[...,0]>0][...,2], bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
+    ax2.set_ylabel(' ', fontsize=12)
+    ax2.set_ylim(0, ylims[2])
+
+    ax3 = fig.add_subplot(gs[0,3])
+    sns.histplot((test[...,0] > 0).sum(axis=1),  bins=bins[3], lw=0.4, fill=True,  color='k', alpha=0.2,element='step', stat='density', ax=ax3)
+    sns.histplot((gen[...,0] > 0).sum(axis=1),  bins=bins[3], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax3)
+    sns.histplot((aachen[...,0] > 0).sum(axis=1),  bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
+    ax3.set_ylabel(' ', fontsize=12)
+    ax3.set_ylim(0, ylims[3])
+
+    # --- BOTTOM ROW: Ratio panels ---
+
+    h0_t, e0 = np.histogram(np.log(test[test[...,0]>0][...,0]), bins=bins[0],      density=True)
+    h0_g, _  = np.histogram(np.log(gen[gen[...,0]>0][...,0]),  bins=e0,         density=True)
+    h0_a, _  = np.histogram(np.log(aachen[aachen[...,0]>0][...,0]), bins=e0,       density=True)
+    centers0 = 0.5*(e0[:-1] + e0[1:])
+    ax0r = fig.add_subplot(gs[1,0], sharex=ax0)
+    ax0r.step(centers0, h0_g/(h0_t+1e-8), where='mid', color='crimson', lw=1)
+    ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
+    ax0r.set_ylim(0.7,1.3)
+    ax0r.set_xlabel(r'$\log(p_T)$')
+    ax0r.set_ylabel('ratio', fontsize=8)
+    ax0r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+
+    h1_t, e1 = np.histogram(test[test[...,0]>0][...,1], bins=bins[1], density=True)
+    h1_g, _  = np.histogram(gen[gen[...,0]>0][...,1],  bins=e1, density=True)
+    h1_a, _  = np.histogram(aachen[aachen[...,0]>0][...,1], bins=e1, density=True)
+    centers1 = 0.5*(e1[:-1] + e1[1:])
+    ax1r = fig.add_subplot(gs[1,1], sharex=ax1)
+    ax1r.step(centers1, h1_g/(h1_t+1e-8), where='mid',color='crimson',lw=1)
+    ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid',   lw=1)
+    ax1r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax1r.set_ylim(0.7,1.3)
+    ax1r.set_xlabel(r'$\Delta\eta$')
+
+    h2_t, e2 = np.histogram(test[test[...,0]>0][...,2], bins=bins[2],      density=True)
+    h2_g, _  = np.histogram(gen[gen[...,0]>0][...,2],  bins=e2,         density=True)
+    h2_a, _  = np.histogram(aachen[aachen[...,0]>0][...,2], bins=e2,       density=True)
+    centers2 = 0.5*(e2[:-1] + e2[1:])
+    ax2r = fig.add_subplot(gs[1,2], sharex=ax2)
+    ax2r.step(centers2, h2_g/(h2_t+1e-8), where='mid', color='crimson',lw=1)
+    ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
+    ax2r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax2r.set_ylim(0.7,1.3)
+    ax2r.set_xlabel(r'$\Delta\phi$')
+
+    h3_t, e3 = np.histogram((test[...,0] > 0).sum(axis=1), bins=bins[3], density=True)
+    h3_g, _  = np.histogram((gen[...,0] > 0).sum(axis=1),  bins=e3,  density=True)
+    h3_a, _  = np.histogram((aachen[...,0] > 0).sum(axis=1), bins=e3,density=True)
+    centers3 = 0.5*(e3[:-1] + e3[1:])
+    ax3r = fig.add_subplot(gs[1,3], sharex=ax3)
+    ax3r.step(centers3, h3_g/(h3_t+1e-8), where='mid',color='crimson',lw=1)
+    ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
+    ax3r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax3r.set_ylim(0.7,1.3)
+    ax3r.set_xlabel(r'$N$')
+
+    plt.tight_layout()
+    plt.savefig(path, dpi=500, bbox_inches='tight')
+
+
+def plot_hl_with_ratio(test, gen, aachen, path='results_plot.png', jet='jetclass'):
+
+    gen_HL = jets_HighLevelFeats(gen)
+    aachen_HL = jets_HighLevelFeats(aachen)
+    test_HL = jets_HighLevelFeats(test)
+
+    gen_substructure = JetSubstructure(gen)
+    aachen_substructure = JetSubstructure(aachen)
+    test_substructure = JetSubstructure(test)
+
+    bins = [np.arange(400, 1200, 16), 
+            np.arange(0., 500, 10), 
+            np.arange(0, 1, 0.025), 
+            np.arange(0, 1, 0.025)]
+
+    ylims = ( 0.008 , 0.025, 5, 6)
+
+    fig = plt.figure(figsize=(12, 2.5))
+    gs = GridSpec(2, 4, height_ratios=(3,1), hspace=0.1, wspace=0.3)
+
+    # --- TOP ROW: Hard‑coded histplots ---
+    
+    ax0 = fig.add_subplot(gs[0,0])
+    sns.histplot(test_HL[...,0],bins=bins[0],lw=0.4,fill=True,  color='k', alpha=0.2,  label=jet, element='step', stat='density', ax=ax0)
+    sns.histplot(gen_HL[...,0], bins=bins[0], lw=0.8, fill=False, color='crimson', label='GPT2 Rutgers',element='step', stat='density', ax=ax0)
+    sns.histplot(aachen_HL[...,0], bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
+    ax0.set_ylabel('density', fontsize=12)
+    ax0.set_ylim(0, ylims[0])
+    ax0.legend(fontsize=7)
+
+    ax1 = fig.add_subplot(gs[0,1])
+    sns.histplot(test_HL[...,3], bins=bins[1], lw=0.4, fill=True,  color='k', alpha=0.2,  element='step', stat='density', ax=ax1)
+    sns.histplot(gen_HL[...,3],  bins=bins[1], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax1)
+    sns.histplot(aachen_HL[...,3], bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
+    ax1.set_ylabel(' ', fontsize=12)
+    ax1.set_ylim(0, ylims[1])
+
+    ax2 = fig.add_subplot(gs[0,2])
+    sns.histplot(test_substructure.tau21, bins=bins[2], lw=0.4, fill=True,  color='k',  alpha=0.2, element='step', stat='density', ax=ax2)
+    sns.histplot(gen_substructure.tau21,  bins=bins[2], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax2)
+    sns.histplot(aachen_substructure.tau21, bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
+    ax2.set_ylabel(' ', fontsize=12)
+    ax2.set_ylim(0, ylims[2])
+
+    ax3 = fig.add_subplot(gs[0,3])
+    sns.histplot(test_substructure.tau32, bins=bins[3], lw=0.4, fill=True,  color='k', alpha=0.2,element='step', stat='density', ax=ax3)
+    sns.histplot(gen_substructure.tau32,  bins=bins[3], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax3)
+    sns.histplot(aachen_substructure.tau32, bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
+    ax3.set_ylabel(' ', fontsize=12)
+    ax3.set_ylim(0, ylims[3])
+
+    # --- BOTTOM ROW: Ratio panels ---
+
+    h0_t, e0 = np.histogram(test_HL[...,0], bins=bins[0],      density=True)
+    h0_g, _  = np.histogram(gen_HL[...,0],  bins=e0,         density=True)
+    h0_a, _  = np.histogram(aachen_HL[...,0], bins=e0,       density=True)
+    centers0 = 0.5*(e0[:-1] + e0[1:])
+    ax0r = fig.add_subplot(gs[1,0], sharex=ax0)
+    ax0r.step(centers0, h0_g/(h0_t+1e-8), where='mid', color='crimson', lw=1)
+    ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
+    ax0r.set_ylim(0.7,1.3)
+    ax0r.set_xlabel(r'jet $p_T$')
+    ax0r.set_ylabel('ratio', fontsize=8)
+    ax0r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+
+    h1_t, e1 = np.histogram(test_HL[...,3], bins=bins[1], density=True)
+    h1_g, _  = np.histogram(gen_HL[...,3],  bins=e1, density=True)
+    h1_a, _  = np.histogram(aachen_HL[...,3], bins=e1, density=True)
+    centers1 = 0.5*(e1[:-1] + e1[1:])
+    ax1r = fig.add_subplot(gs[1,1], sharex=ax1)
+    ax1r.step(centers1, h1_g/(h1_t+1e-8), where='mid',color='crimson',lw=1)
+    ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid',   lw=1)
+    ax1r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax1r.set_ylim(0.7,1.3)
+    ax1r.set_xlabel(r'jet mass')
+
+    h2_t, e2 = np.histogram(test_substructure.tau21, bins=bins[2],      density=True)
+    h2_g, _  = np.histogram(gen_substructure.tau21,  bins=e2,         density=True)
+    h2_a, _  = np.histogram(aachen_substructure.tau21, bins=e2,       density=True)
+    centers2 = 0.5*(e2[:-1] + e2[1:])
+    ax2r = fig.add_subplot(gs[1,2], sharex=ax2)
+    ax2r.step(centers2, h2_g/(h2_t+1e-8), where='mid', color='crimson',lw=1)
+    ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
+    ax2r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax2r.set_ylim(0.7,1.3)
+    ax2r.set_xlabel(r'$\tau_{21}$')
+
+    h3_t, e3 = np.histogram(test_substructure.tau32, bins=bins[3],      density=True)
+    h3_g, _  = np.histogram(gen_substructure.tau32,  bins=e3,         density=True)
+    h3_a, _  = np.histogram(aachen_substructure.tau32, bins=e3,       density=True)
+    centers3 = 0.5*(e3[:-1] + e3[1:])
+    ax3r = fig.add_subplot(gs[1,3], sharex=ax3)
+    ax3r.step(centers3, h3_g/(h3_t+1e-8), where='mid',color='crimson',lw=1)
+    ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
+    ax3r.axhline(y=1, color='k', linestyle='--', lw=0.75)
+    ax3r.set_ylim(0.7,1.3)
+    ax3r.set_xlabel(r'$\tau_{32}$')
+
+    plt.tight_layout()
+    plt.savefig(path, dpi=500, bbox_inches='tight')
 
 
 def ROC(LLR_bckg, LLR_sig, label):
@@ -212,342 +659,3 @@ def ordered_z_plots(toy_qcd, gen_jets, save_file='ordered_z_plots.png', feat=0):
 
     plt.show()
 
-
-
-def make_continuous(jets):
-    pt_bins = np.load("data/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
-    eta_bins = np.load("data/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
-    phi_bins = np.load("data/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
-
-    pt_disc = jets[:, :, 0]
-    eta_disc = jets[:, :, 1]
-    phi_disc = jets[:, :, 2]
-
-    mask = pt_disc < 0
-
-    # pt_con = pt_disc * (pt_bins[1] - pt_bins[0]) + pt_bins[0]
-    # eta_con = eta_disc * (eta_bins[1] - eta_bins[0]) + eta_bins[0]
-    # phi_con = phi_disc * (phi_bins[1] - phi_bins[0]) + phi_bins[0]
-
-    pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * (
-        pt_bins[1] - pt_bins[0]
-    ) + pt_bins[0]
-
-    eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * (
-        eta_bins[1] - eta_bins[0]
-    ) + eta_bins[0]
-    
-    phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * (
-        phi_bins[1] - phi_bins[0]
-    ) + phi_bins[0]
-
-    continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
-    continues_jets[mask] = 0
-
-    return torch.tensor(continues_jets)
-
-
-class JetSubstructure:
-    def __init__(self, constituents, R=0.8, beta=1.0, use_wta_scheme=True):
-
-        pt = constituents[...,0] 
-        eta = constituents[...,1]
-        phi = constituents[...,2]
-
-        constituents_ak = ak.zip(
-            {
-                "pt": np.array(pt),
-                "eta": np.array(eta),
-                "phi": np.array(phi),
-                "mass": np.zeros_like(np.array(pt)),
-            },
-            with_name="Momentum4D",
-        )
-
-        constituents_ak = ak.mask(constituents_ak, constituents_ak.pt > 0)
-        constituents_ak = ak.drop_none(constituents_ak)
-
-        self._constituents_ak = constituents_ak[ak.num(constituents_ak) >= 3]
-
-        if use_wta_scheme:
-            jetdef = fastjet.JetDefinition(
-                fastjet.kt_algorithm, R, fastjet.WTA_pt_scheme
-            )
-        else:
-            jetdef = fastjet.JetDefinition(fastjet.kt_algorithm, R)
-
-        print("Clustering jets with fastjet")
-        print("Jet definition:", jetdef)
-        print("Calculating N-subjettiness")
-
-        self._cluster = fastjet.ClusterSequence(self._constituents_ak, jetdef)
-        self.d0 = self._calc_d0(R, beta)
-        self.c1 = self._cluster.exclusive_jets_energy_correlator(njets=1, func="c1")
-        self.d2 = self._cluster.exclusive_jets_energy_correlator(njets=1, func="d2")
-        self.tau1 = self._calc_tau1(beta)
-        self.tau2 = self._calc_tau2(beta)
-        self.tau3 = self._calc_tau3(beta)
-        self.tau21 = np.ma.divide(self.tau2, self.tau1)
-        self.tau32 = np.ma.divide(self.tau3, self.tau2)
-
-    def _calc_deltaR(self, particles, jet):
-        jet = ak.unflatten(ak.flatten(jet), counts=1)
-        return particles.deltaR(jet)
-
-    def _calc_d0(self, R, beta):
-        """Calculate the d0 values."""
-        return ak.sum(self._constituents_ak.pt * R**beta, axis=1)
-
-    def _calc_tau1(self, beta):
-        """Calculate the tau1 values."""
-        excl_jets_1 = self._cluster.exclusive_jets(n_jets=1)
-        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_1[:, :1])
-        pt_i = self._constituents_ak.pt
-        return ak.sum(pt_i * delta_r_1i**beta, axis=1) / self.d0
-
-    def _calc_tau2(self, beta):
-        """Calculate the tau2 values."""
-        excl_jets_2 = self._cluster.exclusive_jets(n_jets=2)
-        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_2[:, :1])
-        delta_r_2i = self._calc_deltaR(self._constituents_ak, excl_jets_2[:, 1:2])
-        pt_i = self._constituents_ak.pt
-
-        # add new axis to make it broadcastable
-        min_delta_r = ak.min(
-            ak.concatenate(
-                [
-                    delta_r_1i[..., np.newaxis] ** beta,
-                    delta_r_2i[..., np.newaxis] ** beta,
-                ],
-                axis=-1,
-            ),
-            axis=-1,
-        )
-        return ak.sum(pt_i * min_delta_r, axis=1) / self.d0
-
-    def _calc_tau3(self, beta):
-        """Calculate the tau3 values."""
-        excl_jets_3 = self._cluster.exclusive_jets(n_jets=3)
-        delta_r_1i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, :1])
-        delta_r_2i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, 1:2])
-        delta_r_3i = self._calc_deltaR(self._constituents_ak, excl_jets_3[:, 2:3])
-        pt_i = self._constituents_ak.pt
-
-        min_delta_r = ak.min(
-            ak.concatenate(
-                [
-                    delta_r_1i[..., np.newaxis] ** beta,
-                    delta_r_2i[..., np.newaxis] ** beta,
-                    delta_r_3i[..., np.newaxis] ** beta,
-                ],
-                axis=-1,
-            ),
-            axis=-1,
-        )
-        return ak.sum(pt_i * min_delta_r, axis=1) / self.d0
-
-
-
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from matplotlib.gridspec import GridSpec
-
-def plot_hl_with_ratio(test, gen, aachen, bins, ylims, jet='jetclass'):
-    """
-    Plot 4 seaborn histograms of jet high-level features (hard‑coded) with ratio panels below.
-
-    Parameters
-    ----------
-    tops_HL_test, tops_HL_gen, tops_HL_aachen : np.ndarray
-        Arrays of shape (N, 4), where columns are [pT, eta, phi, m].
-    """
-
-    fig = plt.figure(figsize=(12, 2.5))
-    gs = GridSpec(2, 4, height_ratios=(3,1), hspace=0.1, wspace=0.3)
-
-    # --- TOP ROW: Hard‑coded histplots ---
-    
-    ax0 = fig.add_subplot(gs[0,0])
-    sns.histplot(test[...,0],bins=bins[0],lw=0.4,fill=True,  color='k', alpha=0.2,  label=jet, element='step', stat='density', ax=ax0)
-    sns.histplot(gen[...,0], bins=bins[0], lw=0.8, fill=False, color='crimson', label='GPT2 Rutgers',element='step', stat='density', ax=ax0)
-    sns.histplot(aachen[...,0], bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
-    ax0.set_ylabel('density', fontsize=12)
-    ax0.set_ylim(0, ylims[0])
-    ax0.legend(fontsize=7)
-
-    ax1 = fig.add_subplot(gs[0,1])
-    sns.histplot(test[...,1], bins=bins[1], lw=0.4, fill=True,  color='k', alpha=0.2,  element='step', stat='density', ax=ax1)
-    sns.histplot(gen[...,1],  bins=bins[1], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax1)
-    sns.histplot(aachen[...,1], bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
-    ax1.set_ylabel(' ', fontsize=12)
-    ax1.set_ylim(0, ylims[1])
-
-    ax2 = fig.add_subplot(gs[0,2])
-    sns.histplot(test[...,2], bins=bins[2], lw=0.4, fill=True,  color='k',  alpha=0.2, element='step', stat='density', ax=ax2)
-    sns.histplot(gen[...,2],  bins=bins[2], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax2)
-    sns.histplot(aachen[...,2], bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
-    ax2.set_ylabel(' ', fontsize=12)
-    ax2.set_ylim(0, ylims[2])
-
-    ax3 = fig.add_subplot(gs[0,3])
-    sns.histplot(test[...,3], bins=bins[3], lw=0.4, fill=True,  color='k', alpha=0.2,element='step', stat='density', ax=ax3)
-    sns.histplot(gen[...,3],  bins=bins[3], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax3)
-    sns.histplot(aachen[...,3], bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
-    ax3.set_ylabel(' ', fontsize=12)
-    ax3.set_ylim(0, ylims[3])
-
-    # --- BOTTOM ROW: Ratio panels ---
-
-    h0_t, e0 = np.histogram(test[...,0], bins=bins[0],      density=True)
-    h0_g, _  = np.histogram(gen[...,0],  bins=e0,         density=True)
-    h0_a, _  = np.histogram(aachen[...,0], bins=e0,       density=True)
-    centers0 = 0.5*(e0[:-1] + e0[1:])
-
-    ax0r = fig.add_subplot(gs[1,0], sharex=ax0)
-    ax0r.step(centers0, h0_g/(h0_t+1e-8), where='mid', color='crimson', lw=1)
-    ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
-    ax0r.set_ylim(0.5,1.5)
-    ax0r.set_xlabel(r'jet $p_T$')
-    ax0r.set_ylabel('ratio', fontsize=8)
-    ax0r.axhline(y=1, color='k', linestyle='--', lw=0.75)
-
-    h1_t, e1 = np.histogram(test[...,1], bins=bins[1],      density=True)
-    h1_g, _  = np.histogram(gen[...,1],  bins=e1,         density=True)
-    h1_a, _  = np.histogram(aachen[...,1], bins=e1,       density=True)
-    centers1 = 0.5*(e1[:-1] + e1[1:])
-
-    ax1r = fig.add_subplot(gs[1,1], sharex=ax1)
-    ax1r.step(centers1, h1_g/(h1_t+1e-8), where='mid', color='crimson', lw=1)
-    ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid', lw=1)
-    ax1r.axhline(y=1, color='k', linestyle='--', lw=0.75)
-    ax1r.set_ylim(0.5,1.5)
-    ax1r.set_xlabel(r'jet $\eta$')
-
-
-    h2_t, e2 = np.histogram(test[...,2], bins=bins[2],      density=True)
-    h2_g, _  = np.histogram(gen[...,2],  bins=e2,         density=True)
-    h2_a, _  = np.histogram(aachen[...,2], bins=e2,       density=True)
-    centers2 = 0.5*(e2[:-1] + e2[1:])
-
-    ax2r = fig.add_subplot(gs[1,2], sharex=ax2)
-    ax2r.step(centers2, h2_g/(h2_t+1e-8), where='mid', color='crimson',lw=1)
-    ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
-    ax2r.axhline(y=1, color='k', linestyle='--', lw=0.75)
-    ax2r.set_ylim(0.5,1.5)
-    ax2r.set_xlabel(r'jet $\phi$')
-
-    h3_t, e3 = np.histogram(test[...,3], bins=bins[3],      density=True)
-    h3_g, _  = np.histogram(gen[...,3],  bins=e3,         density=True)
-    h3_a, _  = np.histogram(aachen[...,3], bins=e3,       density=True)
-    centers3 = 0.5*(e3[:-1] + e3[1:])
-
-    ax3r = fig.add_subplot(gs[1,3], sharex=ax3)
-    ax3r.step(centers3, h3_g/(h3_t+1e-8), where='mid',color='crimson',lw=1)
-    ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
-    ax3r.axhline(y=1, color='k', linestyle='--', lw=0.75)
-    ax3r.set_ylim(0.5,1.5)
-    ax3r.set_xlabel(r'jet mass')
-
-    plt.tight_layout()
-    plt.show()
-
-
-
-def plot_substructure_with_ratio(test, gen, aachen, bins, ylims, jet='jetclass' ):
-    """
-    Plot 4 seaborn histograms of jet high-level features (hard‑coded) with ratio panels below.
-
-    Parameters
-    ----------
-    tops_HL_test, tops_HL_gen, tops_HL_aachen : np.ndarray
-        Arrays of shape (N, 4), where columns are [pT, eta, phi, m].
-    """
-
-    fig = plt.figure(figsize=(12, 2.5))
-    gs = GridSpec(2, 4, height_ratios=(3,1), hspace=0.1, wspace=0.3)
-
-    # --- TOP ROW: Hard‑coded histplots ---
-    ax0 = fig.add_subplot(gs[0,0])
-    sns.histplot(test.c1, bins=bins[0],lw=0.4,fill=True,  color='k', alpha=0.2,  label=jet, element='step', stat='density', ax=ax0)
-    sns.histplot(gen.c1, bins=bins[0], lw=0.8, fill=False, color='crimson', label='GPT2 Rutgers',element='step', stat='density', ax=ax0)
-    sns.histplot(aachen.c1, bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
-    ax0.set_ylabel('density', fontsize=12)
-    ax0.set_ylim(0, ylims[0])
-    ax0.legend(fontsize=7)
-
-    ax1 = fig.add_subplot(gs[0,1])
-    sns.histplot(test.d2, bins=bins[1], lw=0.4, fill=True,  color='k', alpha=0.2,  element='step', stat='density', ax=ax1)
-    sns.histplot(gen.d2,  bins=bins[1], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax1)
-    sns.histplot(aachen.d2, bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
-    ax1.set_ylabel(' ', fontsize=12)
-    ax1.set_ylim(0, ylims[1])
-
-    ax2 = fig.add_subplot(gs[0,2])
-    sns.histplot(test.tau21, bins=bins[2], lw=0.4, fill=True,  color='k',  alpha=0.2, element='step', stat='density', ax=ax2)
-    sns.histplot(gen.tau21,  bins=bins[2], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax2)
-    sns.histplot(aachen.tau21, bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
-    ax2.set_ylabel(' ', fontsize=12)
-    ax2.set_ylim(0, ylims[2])
-
-    ax3 = fig.add_subplot(gs[0,3])
-    sns.histplot(test.tau32, bins=bins[3], lw=0.4, fill=True,  color='k', alpha=0.2,element='step', stat='density', ax=ax3)
-    sns.histplot(gen.tau32,  bins=bins[3], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax3)
-    sns.histplot(aachen.tau32, bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
-    ax3.set_ylabel(' ', fontsize=12)
-    ax3.set_ylim(0, ylims[3])
-    
-    # --- BOTTOM ROW: Ratio panels ---
-
-    h0_t, e0 = np.histogram(test.c1, bins=bins[0],      density=True)
-    h0_g, _  = np.histogram(gen.c1,  bins=e0,         density=True)
-    h0_a, _  = np.histogram(aachen.c1, bins=e0,       density=True)
-    centers0 = 0.5*(e0[:-1] + e0[1:])
-
-    ax0r = fig.add_subplot(gs[1,0], sharex=ax0)
-    ax0r.step(centers0, h0_g/(h0_t+1e-8), where='mid', color='crimson', lw=1)
-    ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
-    ax0r.set_ylim(0.5,1.5)
-    ax0r.set_xlabel(r'$C_1$')
-    ax0r.set_ylabel('ratio', fontsize=8)
-    ax0r.axhline(y=1, color='k', linestyle='--', lw=0.75)
-
-    h1_t, e1 = np.histogram(test.d2, bins=bins[1],      density=True)
-    h1_g, _  = np.histogram(gen.d2,  bins=e1,         density=True)
-    h1_a, _  = np.histogram(aachen.d2, bins=e1,       density=True)
-    centers1 = 0.5*(e1[:-1] + e1[1:])
-
-    ax1r = fig.add_subplot(gs[1,1], sharex=ax1)
-    ax1r.step(centers1, h1_g/(h1_t+1e-8), where='mid', color='crimson', lw=1)
-    ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid', lw=1)
-    ax1r.axhline(y=1, color='k', linestyle='--', lw=0.75)
-    ax1r.set_ylim(0.5,1.5)
-    ax1r.set_xlabel(r'$D_2$')
-
-
-    h2_t, e2 = np.histogram(test.tau21, bins=bins[2],      density=True)
-    h2_g, _  = np.histogram(gen.tau21,  bins=e2,         density=True)
-    h2_a, _  = np.histogram(aachen.tau21, bins=e2,       density=True)
-    centers2 = 0.5*(e2[:-1] + e2[1:])
-
-    ax2r = fig.add_subplot(gs[1,2], sharex=ax2)
-    ax2r.step(centers2, h2_g/(h2_t+1e-8), where='mid', color='crimson',lw=1)
-    ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
-    ax2r.axhline(y=1, color='k', linestyle='--', lw=0.75)
-    ax2r.set_ylim(0.5,1.5)
-    ax2r.set_xlabel(r'$\tau_{21}$')
-
-    h3_t, e3 = np.histogram(test.tau32, bins=bins[3],      density=True)
-    h3_g, _  = np.histogram(gen.tau32,  bins=e3,         density=True)
-    h3_a, _  = np.histogram(aachen.tau32, bins=e3,       density=True)
-    centers3 = 0.5*(e3[:-1] + e3[1:])
-
-    ax3r = fig.add_subplot(gs[1,3], sharex=ax3)
-    ax3r.step(centers3, h3_g/(h3_t+1e-8), where='mid',color='crimson',lw=1)
-    ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
-    ax3r.axhline(y=1, color='k', linestyle='--', lw=0.75)
-    ax3r.set_ylim(0.5,1.5)
-    ax3r.set_xlabel(r'$\tau_{32}$')
-
-    plt.tight_layout()
-    plt.show()
