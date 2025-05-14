@@ -47,34 +47,42 @@ class JetSequence:
         c = x[..., 2]
         return (a * self.bins[1] + b) * self.bins[2] + c
 
+    def seq_to_bins_decoding(self, seq) -> np.ndarray:
+            """
+            Decode a 1-D sequence of token IDs back into bin triplets ids (a,b,c).
+            """
+            pt, eta, phi = self.bins
+            a = seq // (eta * phi)
+            rem = seq % (eta * phi)
+            b = rem // phi
+            c = rem % phi
+
+            b[a < 0] = -1
+            c[a < 0] = -1
+
+            return np.stack([a, b, c], axis=-1)
+
     def map_to_sequence(self) -> np.ndarray:
         """
         Returns:
           seqs: np.ndarray of shape (N, max_seq_length + 2)
-        where each row is [BOS, token_1 .. token_L, EOS, PAD, ...]
+        where each row is [BOS, token_1..token_S, EOS, PAD]
         """
         # encode raw bins
-        seq = self.bins_to_seq_encoding(self.data)  # (N, D)
-        N, D = seq.shape
-        S = self.max_seq_length
+        seq = self.bins_to_seq_encoding(self.data)  # (N, S)
+        N, _ = seq.shape
 
-        # initialize full-length array with PADs
-        full = np.full((N, S + 2), self.pad_token, dtype=int)
+        start = np.full((N, 1), self.start_token, dtype=int)
+        extra_pad = np.full((N, 1), self.pad_token, dtype=int)
+        seq = np.concatenate([start, seq, extra_pad], axis=1)
+        seq[seq < 0] = self.pad_token
 
-        # BOS
-        if self.start_token is not None:
-            full[:, 0] = self.start_token
+        idx_eos = (seq != self.pad_token).sum(axis=1)
 
-        # copy up to S data tokens
-        length = D
-        if length > S:
-            length = S
-        full[:, 1:1 + length] = seq[:, :length]
+        for i, jet in enumerate(seq):
+            jet[idx_eos[i]] = self.end_token
 
-        # EOS right after last real token (or at position S+1 if truncated)
-        full[:, 1 + length] = self.end_token
-
-        return full
+        return seq
 
 
 class JetSequenceDataset(Dataset):
