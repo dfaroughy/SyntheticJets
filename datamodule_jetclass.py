@@ -31,6 +31,7 @@ class JetSequence:
         if filepath is not None:
             # load raw binned data: shape (N, D, 3)
             self.data = self._load_data()[:, :max_seq_length, :]
+            self.data = self.data.astype(np.int32) # int16 is not enough for 3D bins!
 
     def _load_data(self):
         with h5py.File(self.filepath, "r") as f:
