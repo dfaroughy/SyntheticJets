@@ -6,53 +6,63 @@ from torch.utils.data import DataLoader
 from argparse import ArgumentParser
 
 from models import JetGPT2Model
+from foundation_model import JetGPT2DoubleHeads
 from datamodule_jetclass import JetSequenceDataset
 
 ##########################################################################
 parser = ArgumentParser()
-parser.add_argument("--comet_api_key", type=str, default='8ONjCXJ1ogsqG1UxQzKxYn7tz')
-parser.add_argument("--comet_workspace", type=str, default='dfaroughy')
+parser.add_argument("--num_nodes", "-N", type=int, default=1)
 parser.add_argument("--dir", type=str, default='/pscratch/sd/d/dfarough')
 parser.add_argument("--project_name", "-proj", type=str, default='tokenized-jets')
+parser.add_argument("--comet_workspace", type=str, default='dfaroughy')
+parser.add_argument("--comet_api_key", type=str, default='8ONjCXJ1ogsqG1UxQzKxYn7tz')
 parser.add_argument("--data_path", type=str, default='/pscratch/sd/d/dfarough/JetClass')
 parser.add_argument("--experiment_id", "-id", type=str, default=None)
 parser.add_argument("--tags", type=str, nargs='*')
+
 parser.add_argument("--jet_type", "-type", type=str, default='ZJetsToNuNu')
-parser.add_argument("--num_nodes", "-N", type=int, default=1)
+parser.add_argument("--max_seq_length", "-length", type=int, default=200)
 parser.add_argument("--nBins", "-bins", type=int, nargs=3)
 parser.add_argument("--batch_size", "-bs", type=int, default=128)
+
 parser.add_argument("--n_emb", type=int, default=256)
-parser.add_argument("--n_inner", type=int, default=256)
+parser.add_argument("--n_inner", type=int, default=1024)
 parser.add_argument("--n_layer", type=int, default=8)
 parser.add_argument("--n_head", type=int, default=4)
+parser.add_argument("--pos_encoding", "-pos", type=bool, default=True)
+parser.add_argument("--activation", "-a", type=str, default='gelu_new')
+parser.add_argument("--dropout_attention", "-do_att", type=float, default=0.1)
+parser.add_argument("--dropout_embedding", "-do_emb",type=float, default=0.1)
+parser.add_argument("--dropout_residual", "-do_res", type=float, default=0.1)
+
 parser.add_argument("--lr", type=float, default=0.001)
-parser.add_argument("--lr_final", type=float, default=0.00005)
+parser.add_argument("--lr_final", type=float, default=0.0001)
 parser.add_argument("--max_epochs", "-epochs", type=int, default=50)
 
-args = parser.parse_args()
+config = parser.parse_args()
 ##########################################################################
 
 logger = CometLogger(
-            api_key=args.comet_api_key,
-            project_name=args.project_name,
-            workspace=args.comet_workspace,
-            save_dir=args.dir
-            experiment_key=args.experiment_id if args.experiment_id else None
+            api_key=config.comet_api_key,
+            project_name=config.project_name,
+            workspace=config.comet_workspace,
+            save_dir=config.dir,
+            experiment_key=config.experiment_id if config.experiment_id else None
         )
 
-logger.experiment.add_tags(args.tags)
+logger.experiment.add_tags(config.tags)
 
-train_dataset = JetSequenceDataset(filepath=f"{args.data_path}/train_100M_binned/train_{args.jet_type}_10M_bins403030.h5")
-val_dataset = JetSequenceDataset(filepath=f"{args.data_path}/val_5M_binned/val_{args.jet_type}_500K_bins403030.h5")
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-val_loader   = DataLoader(val_dataset,   batch_size=args.batch_size, shuffle=False)
+train_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_100M_binned/train_{config.jet_type}_10M_bins403030.h5", max_seq_length=config.max_seq_length)
+val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/val_5M_binned/val_{config.jet_type}_500K_bins403030.h5", max_seq_length=config.max_seq_length)
+train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+val_loader   = DataLoader(val_dataset,   batch_size=config.batch_size, shuffle=False)
 
 trainer = L.Trainer(
-    max_epochs=args.max_epochs,
+    max_epochs=config.max_epochs,
     accelerator='gpu',
     devices='auto',
     strategy='ddp',
-    num_nodes=args.num_nodes,
+    num_nodes=config.num_nodes,
     callbacks=[
         L.callbacks.ModelCheckpoint(
             dirpath=None,
@@ -69,22 +79,27 @@ trainer = L.Trainer(
 )
 
 
-if args.experiment_id is None:
+if config.experiment_id is None:
 
     model = JetGPT2Model(
-                n_embd=args.n_emb,
-                n_inner=args.n_inner,
-                n_layer=args.n_layer,
-                n_head=args.n_head,
-                learning_rate=args.lr,
-                learning_rate_final=args.lr_final
+                n_embd=config.n_emb,
+                n_inner=config.n_inner,
+                n_layer=config.n_layer,
+                n_head=config.n_head,
+                activation=config.activation,
+                dropout_att=config.dropout_attention,
+                dropout_emb=config.dropout_embedding,
+                dropout_res=config.dropout_residual,
+                learning_rate=config.lr,
+                learning_rate_final=config.lr_final,
+                pos_encoding=config.pos_encoding,
             )
 
     trainer.fit(model, 
                 train_dataloaders=train_loader, 
                 val_dataloaders=val_loader)
 else:
-    ckpt = f"{args.dir}/{args.project_name}/{args.experiment_id}/checkpoints/last.ckpt"
+    ckpt = f"{config.dir}/{config.project_name}/{config.experiment_id}/checkpoints/last.ckpt"
     model = JetGPT2Model.load_from_checkpoint(ckpt)
     trainer.fit(model,
                 train_dataloaders=train_loader,

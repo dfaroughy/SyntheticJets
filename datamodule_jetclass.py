@@ -17,29 +17,33 @@ class JetSequence:
         start_token: int = None,
         end_token: int = None,
         pad_token: int = -1,
+        get_raw: bool=False
     ):
-        self.filepath = filepath
-        self.num_jets = num_jets
-        self.bins = bins
-        self.max_seq_length = max_seq_length
 
         # special tokens
         self.start_token = start_token
         self.end_token = end_token
         self.pad_token = pad_token
 
+        self.filepath = filepath
+        self.num_jets = num_jets
+        self.bins = bins
+        self.max_seq_length = max_seq_length
+
+
         if filepath is not None:
-            # load raw binned data: shape (N, D, 3)
             self.data = self._load_data()[:, :max_seq_length, :]
             self.data = self.data.astype(np.int32) # int16 is not enough for 3D bins!
+            if get_raw:
+                self.raw = self._load_data('raw/block0_values')[:, :max_seq_length, :]
 
-    def _load_data(self):
+
+    def _load_data(self, key='discretized/block0_values'):
         with h5py.File(self.filepath, "r") as f:
-            arr = f['discretized/block0_values']
-            raw = arr[:] if self.num_jets is None else arr[: self.num_jets]
-        N, D3 = raw.shape[0], raw.shape[1]
-        # reshape to (N, D, 3)
-        return raw.reshape(N, -1, len(self.bins))
+            arr = f[key]
+            sample = arr[:] if self.num_jets is None else arr[: self.num_jets]
+        N = sample.shape[0]
+        return sample.reshape(N, -1, len(self.bins))  # (N, D, 3)
 
     def bins_to_seq_encoding(self, x: np.ndarray) -> np.ndarray:
         # combine 3D bins into flat token IDs
@@ -49,19 +53,19 @@ class JetSequence:
         return (a * self.bins[1] + b) * self.bins[2] + c
 
     def seq_to_bins_decoding(self, seq) -> np.ndarray:
-            """
-            Decode a 1-D sequence of token IDs back into bin triplets ids (a,b,c).
-            """
-            pt, eta, phi = self.bins
-            a = seq // (eta * phi)
-            rem = seq % (eta * phi)
-            b = rem // phi
-            c = rem % phi
+        """
+        Decode a 1-D sequence of token IDs back into bin triplets ids (a,b,c).
+        """
+        pt, eta, phi = self.bins
+        a = seq // (eta * phi)
+        rem = seq % (eta * phi)
+        b = rem // phi
+        c = rem % phi
 
-            b[a < 0] = -1
-            c[a < 0] = -1
+        b[a < 0] = -1
+        c[a < 0] = -1
 
-            return np.stack([a, b, c], axis=-1)
+        return np.stack([a, b, c], axis=-1)
 
     def map_to_sequence(self) -> np.ndarray:
         """
@@ -89,32 +93,39 @@ class JetSequence:
 class JetSequenceDataset(Dataset):
     def __init__(
         self,
-        filepath: str,
+        filepath: str=None,
+        input_ids: str=None,
+        attention_mask: str=None,
         num_jets: int = None,
         max_seq_length: int = 200,
         bins: list = [41, 31, 31],
     ):
-        # special tokens
-        num_bins = int(np.prod(bins))
-        start_token = num_bins    # BOS
-        end_token = num_bins + 1  # EOS
-        pad_token = num_bins + 2  # PAD
 
-        # build sequences
-        seq_builder = JetSequence(
-            filepath=filepath,
-            num_jets=num_jets,
-            max_seq_length=max_seq_length,
-            bins=bins,
-            start_token=start_token,
-            end_token=end_token,
-            pad_token=pad_token,
-        )
-        seqs = seq_builder.map_to_sequence()  # (N, S+2)
+        if filepath is not None: 
+            # special tokens
+            num_bins = int(np.prod(bins))
+            start_token = num_bins    # BOS
+            end_token = num_bins + 1  # EOS
+            pad_token = num_bins + 2  # PAD
 
-        # store tensors
-        self.input_ids = torch.from_numpy(seqs).long()
-        self.attention_mask = (self.input_ids != pad_token).long()
+            # build sequences
+            seq_builder = JetSequence(filepath=filepath,
+                                    num_jets=num_jets,
+                                    max_seq_length=max_seq_length,
+                                    bins=bins,
+                                    start_token=start_token,
+                                    end_token=end_token,
+                                    pad_token=pad_token,
+                                    )
+            seqs = seq_builder.map_to_sequence()  # (N, S+2)
+
+            # store tensors
+            self.input_ids = torch.from_numpy(seqs).long()
+            self.attention_mask = (self.input_ids != pad_token).long()
+        
+        else:
+            self.input_ids = input_ids[:, num_jets]
+            self.attention_mask = attention_mask[: num_jets]
 
     def __len__(self):
         return self.input_ids.size(0)
