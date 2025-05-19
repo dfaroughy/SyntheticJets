@@ -37,11 +37,11 @@ dataloader = DataLoader(dataset, batch_size=config.batch_size)
 
 callback = LogProbsCallback(config=config)
 
-inference = L.Trainer(accelerator="gpu", 
+log_probs = L.Trainer(accelerator="gpu", 
                       devices='auto', 
                       strategy='ddp', 
                       num_nodes=config.num_nodes, 
                       callbacks=[callback])
 
-inference.predict(model, dataloaders=dataloader)
+log_probs.predict(model, dataloaders=dataloader)
 
