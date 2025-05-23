@@ -95,20 +95,17 @@ class JetSequenceDataset(Dataset):
         self,
         filepath: str=None,
         input_ids: str=None,
-        attention_mask: str=None,
         num_jets: int = None,
         max_seq_length: int = 200,
         bins: list = [41, 31, 31],
     ):
+        num_bins = int(np.prod(bins))
+        start_token = num_bins    # BOS
+        end_token = num_bins + 1  # EOS
+        pad_token = num_bins + 2  # PAD
 
         if filepath is not None: 
-            # special tokens
-            num_bins = int(np.prod(bins))
-            start_token = num_bins    # BOS
-            end_token = num_bins + 1  # EOS
-            pad_token = num_bins + 2  # PAD
 
-            # build sequences
             seq_builder = JetSequence(filepath=filepath,
                                     num_jets=num_jets,
                                     max_seq_length=max_seq_length,
@@ -117,15 +114,14 @@ class JetSequenceDataset(Dataset):
                                     end_token=end_token,
                                     pad_token=pad_token,
                                     )
+                                    
             seqs = seq_builder.map_to_sequence()  # (N, S+2)
-
-            # store tensors
             self.input_ids = torch.from_numpy(seqs).long()
             self.attention_mask = (self.input_ids != pad_token).long()
         
         else:
-            self.input_ids = input_ids[:, num_jets]
-            self.attention_mask = attention_mask[: num_jets]
+            self.input_ids = input_ids[:num_jets]
+            self.attention_mask = (self.input_ids != pad_token).long()
 
     def __len__(self):
         return self.input_ids.size(0)

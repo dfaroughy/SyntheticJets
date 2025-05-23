@@ -165,24 +165,33 @@ class JetGPT2Model(L.LightningModule):
     @torch.no_grad()
     def compute_log_probs(self, batch, preprocessed=False):
 
-        labels = batch["input_ids"].clone()
-        labels[labels >= self.start_token] = -100 
+        batch_ids = batch["input_ids"].squeeze(1)  # (B, 1, L)  -> (B, L) 
+        batch_mask  = batch["attention_mask"]        
 
-        outputs = self.model(input_ids=batch["input_ids"],
-                             attention_mask=batch["attention_mask"],
-                             labels=labels,
+        targets = batch_ids.clone()
+        targets[targets == self.start_token] = -100 
+        targets[targets == self.end_token] = -100 
+        targets[targets == self.pad_token] = -100 
+
+        outputs = self.model(input_ids=batch_ids,
+                            attention_mask=batch_mask,
+                            labels=targets,
                             )
 
         logits = outputs.logits[:, :-1, :] # drop end token pred
-        labels = labels[:, 1:] # align labels by shifting right
+        targets = targets[:, 1:]  # align labels by shifting right
 
-        logp = -F.cross_entropy(logits.reshape(-1, logits.size(-1)),
-                                labels.reshape(-1),
+        logits = logits.reshape(-1, logits.size(-1))
+        targets = targets.reshape(-1)
+
+        logp = -F.cross_entropy(logits,
+                                targets,
                                 reduction="none",
                                 ignore_index=-100,
                                 )
 
-        return logp.reshape(batch["input_ids"].size(0), -1).sum(dim=1)  # (B,)
+        return logp.reshape(batch_ids.size(0), -1).sum(dim=1)  # (B,)
+
 
     @torch.no_grad()
     def per_token_preds(self, seq, device=None):
@@ -378,40 +387,40 @@ class JetGPT2Model(L.LightningModule):
 
 #     # ...other functions
 
-#     @torch.no_grad()
-#     def log_probs(self, sample, batch_size=256, device="cuda"):
-#         """
-#         Compute total log-likelihoods for a batch of sequences.
-#         Args: seq (N, seq_length)
-#         Returns: log_probs (N,) — log-prob of each sequence
-#         """
-#         self.model.eval()
-#         self.model.to(device)
-#         N = sample.shape[0]
+    # @torch.no_grad()
+    # def log_probs(self, sample, batch_size=256, device="cuda"):
+    #     """
+    #     Compute total log-likelihoods for a batch of sequences.
+    #     Args: seq (N, seq_length)
+    #     Returns: log_probs (N,) — log-prob of each sequence
+    #     """
+    #     self.model.eval()
+    #     self.model.to(device)
+    #     N = sample.shape[0]
 
-#         start = torch.full((N, 1), self.start_token, dtype=torch.long, device=device)
-#         seqs = torch.cat([start, sample.to(device)], dim=1)  # (N, seq_len+1)
-#         dataset = TensorDataset(seqs)
-#         dataloader = DataLoader(dataset, batch_size=batch_size)
+    #     start = torch.full((N, 1), self.start_token, dtype=torch.long, device=device)
+    #     seqs = torch.cat([start, sample.to(device)], dim=1)  # (N, seq_len+1)
+    #     dataset = TensorDataset(seqs)
+    #     dataloader = DataLoader(dataset, batch_size=batch_size)
 
-#         log_probs = []
+    #     log_probs = []
 
-#         for (batch,) in dataloader:
+    #     for (batch,) in dataloader:
 
-#             outputs = self.model(batch, labels=batch)
-#             logits = outputs.logits[:, :-1]       # (N, seq_len) shifted right
-#             labels = batch[:, 1:]                 # (N, seq_len)
+    #         outputs = self.model(batch, labels=batch)
+    #         logits = outputs.logits[:, :-1]       # (N, seq_len) shifted right
+    #         labels = batch[:, 1:]                 # (N, seq_len)
 
-#             logp = -F.cross_entropy(
-#                 logits.reshape(-1, logits.size(-1)),
-#                 labels.reshape(-1),
-#                 reduction='none'
-#             )
+    #         logp = -F.cross_entropy(
+    #             logits.reshape(-1, logits.size(-1)),
+    #             labels.reshape(-1),
+    #             reduction='none'
+    #         )
 
-#             logp = logp.reshape(batch.size(0), -1).sum(dim=-1)  # (N,)
-#             log_probs.append(logp.cpu())
+    #         logp = logp.reshape(batch.size(0), -1).sum(dim=-1)  # (N,)
+    #         log_probs.append(logp.cpu())
 
-#         return torch.cat(log_probs, dim=0)
+    #     return torch.cat(log_probs, dim=0)
 
 #     @torch.no_grad()
 #     def per_token_preds(self, seq, device=None):

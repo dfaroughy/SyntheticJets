@@ -126,19 +126,17 @@ class LogProbsCallback(Callback):
         self.config = config
         self.jet_type = config.jet_type
         self.experiment_dir = Path(f'{config.dir}/{config.project_name}/{config.experiment_id}')
-        self.tag = config.tag
+        self.predict_type = self.config.predict_type
+        self.file_name = f'{self.jet_type}_{self.predict_type}_{config.eval_data_type}_{config.tag}'
 
     def on_predict_start(self, trainer, pl_module):
         self.batched_data = []
-        self.predict_type = self.config.predict_type
-        self.file_name = f'{self.predict_type}_{self.jet_type}_{self.tag}'
 
     def on_predict_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
         self.batched_data.append(outputs)
 
     def on_predict_end(self, trainer, pl_module):
         rank = trainer.global_rank
-
         self._save_results_local(rank)
         trainer.strategy.barrier()  # wait for all ranks to finish
 
@@ -148,25 +146,16 @@ class LogProbsCallback(Callback):
 
     def _save_results_local(self, rank):
         data = torch.cat(self.batched_data, dim=0)
-        random = np.random.randint(0, 1000)
+        random = np.random.randint(0, 10000)
         path = f"{self.experiment_dir}/{self.predict_type}_temp_data_{rank}_{random}.pt"
         torch.save(data, path)
 
     @rank_zero_only
     def _gather_results_global(self, trainer):
-        suffix = np.random.randint(0, 1000)
-        os.mkdir(f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}')
-
-        with open(f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}/configs.yaml' , 'w' ) as outfile:
-            yaml.dump( self.config.__dict__, outfile, sort_keys=False)
-
         temp_files = self.experiment_dir.glob(f"{self.predict_type}_temp_data_*_*.pt")
         logprobs = torch.cat([torch.load(str(f)) for f in temp_files], dim=0)
-        np.save(f'{self.experiment_dir}/logp_results_{suffix}_{self.tag}/{self.file_name}_tokens.npy', logprobs)
-        print(f'\nINFO: computing log-liklihood of provided jet sequences')
-        print(f'INFO: log-probs saved in {self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}')
-
-        self._plot_results(logprobs, path=f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}', N=1_000_000)
+        np.save(f'{self.experiment_dir}/{self.file_name}.npy', logprobs)
+        print(f'\nINFO: computing log-likelihood: {self.file_name}')
 
 
     def _clean_temp_files(self):
