@@ -82,10 +82,12 @@ class GeneratorCallback(Callback):
         np.save(f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}/{self.file_name}_binned.npy', data_binned)
         print(f'INFO: saved binned jets with shape {data_binned.shape}')
 
-        self._plot_results(data_binned, 
-                           path=f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}', 
-                           N=1_000_000
-                           )
+        if self.config.plots:
+            print('INFO: plotting results...')
+            self._plot_results(data_binned, 
+                            path=f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}', 
+                            N=1_000_000
+                            )
 
     def _clean_temp_files(self):
         for f in self.experiment_dir.glob(f"{self.predict_type}_temp_data_*_*.pt"):
@@ -125,9 +127,10 @@ class LogProbsCallback(Callback):
         super().__init__()
         self.config = config
         self.jet_type = config.jet_type
+        self.eval_type = config.eval_data_type
         self.experiment_dir = Path(f'{config.dir}/{config.project_name}/{config.experiment_id}')
         self.predict_type = self.config.predict_type
-        self.file_name = f'{self.jet_type}_{self.predict_type}_{config.eval_data_type}_{config.tag}'
+        self.file_name = f'{self.jet_type}_{self.predict_type}_{self.eval_type}_{config.tag}'
 
     def on_predict_start(self, trainer, pl_module):
         self.batched_data = []
@@ -146,20 +149,20 @@ class LogProbsCallback(Callback):
 
     def _save_results_local(self, rank):
         data = torch.cat(self.batched_data, dim=0)
-        random = np.random.randint(0, 10000)
-        path = f"{self.experiment_dir}/{self.predict_type}_temp_data_{rank}_{random}.pt"
+        path = f"{self.experiment_dir}/{self.jet_type}_{self.predict_type}_{self.eval_type}_temp_rank_{rank}.pt"
         torch.save(data, path)
+
 
     @rank_zero_only
     def _gather_results_global(self, trainer):
-        temp_files = self.experiment_dir.glob(f"{self.predict_type}_temp_data_*_*.pt")
+        temp_files = sorted(self.experiment_dir.glob(f"{self.jet_type}_{self.predict_type}_{self.eval_type}_temp_rank_*.pt"))
         logprobs = torch.cat([torch.load(str(f)) for f in temp_files], dim=0)
         np.save(f'{self.experiment_dir}/{self.file_name}.npy', logprobs)
         print(f'\nINFO: computing log-likelihood: {self.file_name}')
 
 
     def _clean_temp_files(self):
-        for f in self.experiment_dir.glob(f"{self.predict_type}_temp_data_*_*.pt"):
+        for f in self.experiment_dir.glob(f"{self.jet_type}_{self.predict_type}_{self.eval_type}_temp_rank_*.pt"):
             f.unlink()
 
     def _plot_results(self, logprobs, path, N=10_000):

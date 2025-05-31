@@ -17,15 +17,17 @@ parser.add_argument("--project_name", "-proj", type=str, default='tokenized-jets
 parser.add_argument("--experiment_id", "-id", type=str, default=None)
 parser.add_argument("--tag", type=str, default=None)
 parser.add_argument("--data_path", type=str, default='/pscratch/sd/d/dfarough/JetClass')
+parser.add_argument("--checkpoint", "-ckpt", type=str, default='best.ckpt')
 parser.add_argument("--jet_type", "-type", type=str, default=None)
 parser.add_argument("--top_k", type=int, default=5000)
 parser.add_argument("--num_jets", "-n", type=int, default=1000000)
 parser.add_argument("--batch_size", "-bs", type=int, default=1024)
+parser.add_argument("--plots", "-plt", type=bool, default=True)
 
 config = parser.parse_args()
 ###############################################################################
 
-model = JetGPT2Model.load_from_checkpoint(f"{config.dir}/{config.project_name}/{config.experiment_id}/checkpoints/best.ckpt", map_location="cpu",)
+model = JetGPT2Model.load_from_checkpoint(f"{config.dir}/{config.project_name}/{config.experiment_id}/checkpoints/{config.checkpoint}", map_location="cpu",)
 model.predict_type = config.predict_type
 model.top_k = config.top_k  
 

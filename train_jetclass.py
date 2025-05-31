@@ -57,22 +57,39 @@ val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/val_5M_binned/val
 train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
 val_loader   = DataLoader(val_dataset,   batch_size=config.batch_size, shuffle=False)
 
+
+checkpoint_every_epoch = L.callbacks.ModelCheckpoint(
+    dirpath=None,
+    filename="{epoch:03d}",       
+    save_top_k=-1,                   # keep *all* checkpoints
+    every_n_epochs=1,                # save after each epoch
+    save_on_train_epoch_end=True,    # use training-epoch boundary
+)
+
+checkpoint_best_and_last = L.callbacks.ModelCheckpoint(
+    dirpath=None,
+    filename="best",                      # still keep the best model
+    monitor="val_loss",
+    mode="min",
+    save_top_k=1,
+    save_last=True,
+)
+
 trainer = L.Trainer(
     max_epochs=config.max_epochs,
     accelerator='gpu',
     devices='auto',
     strategy='ddp',
     num_nodes=config.num_nodes,
-    callbacks=[
-        L.callbacks.ModelCheckpoint(
-            dirpath=None,
-            monitor="val_loss",
-            filename="best",
-            save_top_k=1,
-            mode="min",
-            save_last=True,
-        )
-    ],
+    callbacks=[checkpoint_every_epoch, checkpoint_best_and_last],
+        # L.callbacks.ModelCheckpoint(
+        #     dirpath=None,
+        #     monitor="val_loss",
+        #     filename="best",
+        #     save_top_k=1,
+        #     mode="min",
+        #     save_last=True,
+        # )],
     logger=logger,
     sync_batchnorm=True,
     gradient_clip_val=1.0,
