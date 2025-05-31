@@ -165,32 +165,26 @@ class JetGPT2Model(L.LightningModule):
     @torch.no_grad()
     def compute_log_probs(self, batch, preprocessed=False):
 
-        batch_ids = batch["input_ids"].squeeze(1)  # (B, 1, L)  -> (B, L) 
-        batch_mask  = batch["attention_mask"]        
+        batch_ids  = batch["input_ids"].squeeze(1)
+        batch_mask =  batch["attention_mask"].squeeze(1)
 
         targets = batch_ids.clone()
-        targets[targets == self.start_token] = -100 
-        targets[targets == self.end_token] = -100 
-        targets[targets == self.pad_token] = -100 
+        targets[targets == self.pad_token] = -100  # CE ignores
 
         outputs = self.model(input_ids=batch_ids,
                             attention_mask=batch_mask,
-                            labels=targets,
                             )
 
-        logits = outputs.logits[:, :-1, :] # drop end token pred
+        logits = outputs.logits[:, :-1] # drop last token pred
         targets = targets[:, 1:]  # align labels by shifting right
 
-        logits = logits.reshape(-1, logits.size(-1))
-        targets = targets.reshape(-1)
-
-        logp = -F.cross_entropy(logits,
-                                targets,
+        logp = -F.cross_entropy(logits.reshape(-1, logits.size(-1)),
+                                targets.reshape(-1),
                                 reduction="none",
                                 ignore_index=-100,
-                                )
+                                ).view(batch_ids.size(0), -1)
 
-        return logp.reshape(batch_ids.size(0), -1).sum(dim=1)  # (B,)
+        return logp.sum(dim=1)
 
 
     @torch.no_grad()
@@ -213,23 +207,22 @@ class JetGPT2Model(L.LightningModule):
         """ Mask out the padding tokens in the labels.
         """
         labels = labels.clone()
-        pads_mask = labels >= self.pad_token
-        labels[pads_mask] = -100  # CE ignores
+        labels[labels == self.pad_token] = -100  # CE ignores
         return labels
 
-    def _seq_pad(self, sample):    
+    # def _seq_pad(self, sample):    
         
-        results = []
+    #     results = []
         
-        for seq in sample:
-            if seq.numel() < self.max_seq_length:
-                seq = F.pad(seq, (0, self.max_seq_length - seq.numel()), value=self.pad_token)
-            else:
-                seq = seq[: self.max_seq_length]
+    #     for seq in sample:
+    #         if seq.numel() < self.max_seq_length:
+    #             seq = F.pad(seq, (0, self.max_seq_length - seq.numel()), value=self.pad_token)
+    #         else:
+    #             seq = seq[: self.max_seq_length]
                 
-            results.append(seq)
+    #         results.append(seq)
         
-        return torch.stack(results)
+    #     return torch.stack(results)
 
     # @torch.no_grad()
     # def log_probs(self, sample, batch_size=256, device="cuda"):
