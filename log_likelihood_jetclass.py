@@ -29,19 +29,19 @@ config = parser.parse_args()
 
 ###############################################################################
 
-model_virgin =  JetGPT2Model(
-                n_embd=config.n_emb,
-                n_inner=config.n_inner,
-                n_layer=config.n_layer,
-                n_head=config.n_head,
-                activation=config.activation,
-                dropout_att=config.dropout_attention,
-                dropout_emb=config.dropout_embedding,
-                dropout_res=config.dropout_residual,
-                learning_rate=config.lr,
-                learning_rate_final=config.lr_final,
-                pos_encoding=config.pos_encoding,
-            )
+# model_virgin =  JetGPT2Model(
+#                 n_embd=config.n_emb,
+#                 n_inner=config.n_inner,
+#                 n_layer=config.n_layer,
+#                 n_head=config.n_head,
+#                 activation=config.activation,
+#                 dropout_att=config.dropout_attention,
+#                 dropout_emb=config.dropout_embedding,
+#                 dropout_res=config.dropout_residual,
+#                 learning_rate=config.lr,
+#                 learning_rate_final=config.lr_final,
+#                 pos_encoding=config.pos_encoding,
+#             )
 
 model = JetGPT2Model.load_from_checkpoint(f"{config.dir}/{config.project_name}/{config.experiment_id}/checkpoints/{config.checkpoint}", map_location="cpu",)
 model.predict_type = config.predict_type

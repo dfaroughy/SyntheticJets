@@ -22,7 +22,7 @@ parser.add_argument("--jet_type", "-type", type=str, default=None)
 parser.add_argument("--top_k", type=int, default=5000)
 parser.add_argument("--num_jets", "-n", type=int, default=1000000)
 parser.add_argument("--batch_size", "-bs", type=int, default=1024)
-parser.add_argument("--plots", "-plt", type=bool, default=True)
+parser.add_argument("--plots", "-plt", type=bool, default=False)
 
 config = parser.parse_args()
 ###############################################################################

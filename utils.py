@@ -86,7 +86,7 @@ class GeneratorCallback(Callback):
             print('INFO: plotting results...')
             self._plot_results(data_binned, 
                             path=f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}', 
-                            N=1_000_000
+                            N=100_000
                             )
 
     def _clean_temp_files(self):
