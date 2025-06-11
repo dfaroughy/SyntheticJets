@@ -10,6 +10,7 @@ import pandas as pd
 class JetSequence:
     def __init__(
         self,
+        data: np.ndarray = None,
         filepath: str = None,
         num_jets: int = None,
         max_seq_length: int = 200,  # maximum number of constituents
@@ -24,12 +25,10 @@ class JetSequence:
         self.start_token = start_token
         self.end_token = end_token
         self.pad_token = pad_token
-
         self.filepath = filepath
         self.num_jets = num_jets
         self.bins = bins
         self.max_seq_length = max_seq_length
-
 
         if filepath is not None:
             self.data = self._load_data()[:, :max_seq_length, :]
@@ -37,6 +36,9 @@ class JetSequence:
             if get_raw:
                 self.raw = self._load_data('raw/block0_values')[:, :max_seq_length, :]
 
+        elif data is not None:
+            self.data = data[:, :max_seq_length, :]
+            self.data = self.data.astype(np.int32)
 
     def _load_data(self, key='discretized/block0_values'):
         with h5py.File(self.filepath, "r") as f:
@@ -71,7 +73,7 @@ class JetSequence:
         """
         Returns:
           seqs: np.ndarray of shape (N, max_seq_length + 2)
-        where each row is [BOS, token_1..token_S, EOS, PAD]
+        where each row is [BOS, token_1, ..., token_S, EOS, PAD, PAD, ...]
         """
         # encode raw bins
         seq = self.bins_to_seq_encoding(self.data)  # (N, S)
@@ -88,6 +90,31 @@ class JetSequence:
             jet[idx_eos[i]] = self.end_token
 
         return seq
+
+    def log_symmetry_factor(self, seqs: np.ndarray) -> np.ndarray:
+        """
+        Compute log (symmetry factor) = sum_k log(N_k!) for each jet in a batch.
+        """
+        seqs = np.where(seqs >= self.start_token , -1 * np.ones_like(seqs), seqs)
+        jets = np.asarray(self.seq_to_bins_decoding(seqs)[:, 1:-1])
+
+        pt_bins = jets[..., 0].astype(int)
+        N = pt_bins.shape[0]
+        log_S = np.zeros(N, dtype=float)
+
+        for i in range(N):
+            _, counts = np.unique(pt_bins[i], return_counts=True)
+            counts = counts[counts > 1]
+            log_S[i] = np.sum(gammaln(counts + 1))
+
+        return log_S
+    
+    def multiplicities(self, seqs: np.ndarray) -> np.ndarray:
+        """
+        Compute the multiplicities of each jet in a batch.
+        """
+        return np.sum(seqs < self.start_token, axis=1)
+
 
 
 class JetSequenceDataset(Dataset):
