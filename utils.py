@@ -274,6 +274,79 @@ class JetSubstructure:
 
 
 
+def binnify(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass', make_continuous=False):
+
+    """
+    log(pt) bins:  
+    
+    [-0.76029712 -0.56371887 -0.36714061 -0.17056236  0.0260159   0.22259415
+    0.4191724   0.61575066  0.81232891  1.00890716  1.20548542  1.40206367
+    1.59864192  1.79522018  1.99179843  2.18837668  2.38495494  2.58153319
+    2.77811144  2.9746897   3.17126795  3.36784621  3.56442446  3.76100271
+    3.95758097  4.15415922  4.35073747  4.54731573  4.74389398  4.94047223
+    5.13705049  5.33362874  5.53020699  5.72678525  5.9233635   6.11994175
+    6.31652001  6.51309826  6.70967651  6.90625477]
+
+    eta bins:  
+    
+    [-0.8        -0.74482759 -0.68965517 -0.63448276 -0.57931034 -0.52413793
+    -0.46896552 -0.4137931  -0.35862069 -0.30344828 -0.24827586 -0.19310345
+    -0.13793103 -0.08275862 -0.02758621  0.02758621  0.08275862  0.13793103
+    0.19310345  0.24827586  0.30344828  0.35862069  0.4137931   0.46896552
+    0.52413793  0.57931034  0.63448276  0.68965517  0.74482759  0.8       ]
+
+    phi bins:  
+    
+    [-0.8        -0.74482759 -0.68965517 -0.63448276 -0.57931034 -0.52413793
+    -0.46896552 -0.4137931  -0.35862069 -0.30344828 -0.24827586 -0.19310345
+    -0.13793103 -0.08275862 -0.02758621  0.02758621  0.08275862  0.13793103
+    0.19310345  0.24827586  0.30344828  0.35862069  0.4137931   0.46896552
+    0.52413793  0.57931034  0.63448276  0.68965517  0.74482759  0.8       ]
+
+    """
+
+
+    pt_bins = np.load(f"{bin_dir}/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
+    eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
+    phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
+
+    print(len(pt_bins), len(eta_bins), len(phi_bins))
+
+    pt_disc = jets[:, :, 0]
+    eta_disc = jets[:, :, 1]
+    phi_disc = jets[:, :, 2]
+
+    mask = pt_disc < 0
+
+    d_pt = np.abs(pt_bins[1] - pt_bins[0])
+    d_eta = np.abs(eta_bins[1] - eta_bins[0])
+    d_phi = np.abs(phi_bins[1] - phi_bins[0])
+
+    if make_continuous:
+        pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * (
+            pt_bins[1] - pt_bins[0]
+        ) + pt_bins[0]
+
+        eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * (
+            eta_bins[1] - eta_bins[0]
+        ) + eta_bins[0]
+        
+        phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * (
+            phi_bins[1] - phi_bins[0]
+        ) + phi_bins[0]
+    
+    else:
+        pt_con = pt_bins[pt_disc] + 0.5 * d_pt if pt_disc < len(pt_bins)  else pt_bins[pt_disc] - 0.5 * d_pt
+        eta_con = eta_bins[eta_disc] + 0.5 * d_eta if eta_disc < len(eta_bins) else eta_bins[eta_disc] - 0.5 * d_eta
+        phi_con = phi_bins[phi_disc] + 0.5 * d_phi if phi_disc < len(phi_bins) else phi_bins[phi_disc] - 0.5 * d_phi
+
+    continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
+    continues_jets[mask] = 0
+
+    return torch.tensor(continues_jets)
+
+
+
 def make_continuous(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass'):
     pt_bins = np.load(f"{bin_dir}/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
     eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
