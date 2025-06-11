@@ -21,7 +21,7 @@ parser.add_argument("--experiment_id", "-id", type=str, default=None)
 parser.add_argument("--tags", type=str, nargs='*')
 
 parser.add_argument("--jet_type", "-type", type=str, default='ZJetsToNuNu')
-parser.add_argument("--max_seq_length", "-length", type=int, default=200)
+parser.add_argument("--max_seq_length", "-len", type=int, default=200)
 parser.add_argument("--nBins", "-bins", type=int, nargs=3)
 parser.add_argument("--batch_size", "-bs", type=int, default=128)
 
@@ -82,14 +82,6 @@ trainer = L.Trainer(
     strategy='ddp',
     num_nodes=config.num_nodes,
     callbacks=[checkpoint_every_epoch, checkpoint_best_and_last],
-        # L.callbacks.ModelCheckpoint(
-        #     dirpath=None,
-        #     monitor="val_loss",
-        #     filename="best",
-        #     save_top_k=1,
-        #     mode="min",
-        #     save_last=True,
-        # )],
     logger=logger,
     sync_batchnorm=True,
     gradient_clip_val=1.0,

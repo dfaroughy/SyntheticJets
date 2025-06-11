@@ -28,6 +28,7 @@ class GeneratorCallback(Callback):
         self.jet_type = config.jet_type
         self.data_dir = f'{config.dir}/JetClass' 
         self.tag = config.tag
+        self.max_seq_length=config.max_seq_length
 
     def on_predict_start(self, trainer, pl_module):
         self.batched_data = []
@@ -59,10 +60,9 @@ class GeneratorCallback(Callback):
     @rank_zero_only
     def _gather_results_global(self, trainer):
         
-        suffix = np.random.randint(0, 1000)
-        os.mkdir(f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}')
+        os.mkdir(f'{self.experiment_dir}/{self.predict_type}_results_{self.tag}')
 
-        with open(f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}/configs.yaml' , 'w' ) as outfile:
+        with open(f'{self.experiment_dir}/{self.predict_type}_results_{self.tag}/configs.yaml' , 'w' ) as outfile:
             yaml.dump( self.config.__dict__, outfile, sort_keys=False)
 
         temp_files = self.experiment_dir.glob(f"{self.predict_type}_temp_data_*_*.pt")
@@ -70,22 +70,21 @@ class GeneratorCallback(Callback):
 
         print(f'INFO: first event: {data_tokens[0]}')
 
-        np.save(f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}/{self.file_name}_tokens.npy', data_tokens)
+        np.save(f'{self.experiment_dir}/{self.predict_type}_results_{self.tag}/{self.file_name}_tokens.npy', data_tokens)
         print(f'\nINFO: generated {data_tokens.shape[0]} jet sequences')
-        print(f'INFO: data saved in {self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}')
+        print(f'INFO: data saved in {self.experiment_dir}/{self.predict_type}_results_{self.tag}')
 
         Jets = JetSequence()
-
         data_tokens = torch.where(data_tokens>=self.start_token, -1 * torch.ones_like(data_tokens), data_tokens)
-        data_binned = make_continuous(Jets.seq_to_bins_decoding(data_tokens[:, 1:]), self.data_dir) # rm start token
+        data_binned = binnify(Jets.seq_to_bins_decoding(data_tokens[:, 1:]), self.data_dir) # rm start token
 
-        np.save(f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}/{self.file_name}_binned.npy', data_binned)
+        np.save(f'{self.experiment_dir}/{self.predict_type}_results_{self.tag}/{self.file_name}_binned.npy', data_binned)
         print(f'INFO: saved binned jets with shape {data_binned.shape}')
 
         if self.config.plots:
             print('INFO: plotting results...')
             self._plot_results(data_binned, 
-                            path=f'{self.experiment_dir}/{self.predict_type}_results_{suffix}_{self.tag}', 
+                            path=f'{self.experiment_dir}/{self.predict_type}_results_{self.tag}', 
                             N=100_000
                             )
 
@@ -100,12 +99,12 @@ class GeneratorCallback(Callback):
 
         #...get test and Aachen data for comparison:
 
-        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5')
-        test_disc = make_continuous(torch.tensor(test_seq.data[:N]).long(), self.data_dir)
+        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5', max_seq_length=self.max_seq_length)
+        test_disc = binnify(torch.tensor(test_seq.data[:N]).long(), self.data_dir)
         # test_cont = torch.tensor(test_seq.raw[:N]).long()
 
-        aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5',  )
-        aachen = make_continuous(torch.tensor(aachen_seq.data[:N]).long(), self.data_dir)
+        aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', max_seq_length=self.max_seq_length)
+        aachen = binnify(torch.tensor(aachen_seq.data[:N]).long(), self.data_dir)
 
         #...plot:
 
@@ -323,28 +322,19 @@ def binnify(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass', make_continuous=Fa
     d_phi = np.abs(phi_bins[1] - phi_bins[0])
 
     if make_continuous:
-        pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * (
-            pt_bins[1] - pt_bins[0]
-        ) + pt_bins[0]
-
-        eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * (
-            eta_bins[1] - eta_bins[0]
-        ) + eta_bins[0]
-        
-        phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * (
-            phi_bins[1] - phi_bins[0]
-        ) + phi_bins[0]
+        pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * d_pt + pt_bins[0]
+        eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * d_eta + eta_bins[0]
+        phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * d_phi + phi_bins[0]
     
     else:
-        pt_con = pt_bins[pt_disc] + 0.5 * d_pt if pt_disc < len(pt_bins)  else pt_bins[pt_disc] - 0.5 * d_pt
-        eta_con = eta_bins[eta_disc] + 0.5 * d_eta if eta_disc < len(eta_bins) else eta_bins[eta_disc] - 0.5 * d_eta
-        phi_con = phi_bins[phi_disc] + 0.5 * d_phi if phi_disc < len(phi_bins) else phi_bins[phi_disc] - 0.5 * d_phi
+        pt_con = pt_disc * d_pt + pt_bins[0]
+        eta_con = eta_disc * d_eta + eta_bins[0]
+        phi_con = phi_disc * d_phi + phi_bins[0]
 
     continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
     continues_jets[mask] = 0
 
     return torch.tensor(continues_jets)
-
 
 
 def make_continuous(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass'):
