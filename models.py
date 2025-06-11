@@ -5,10 +5,10 @@ import pytorch_lightning as L
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn.functional as F
+from scipy.special import gammaln, gamma
 
 from transformers import GPT2LMHeadModel, GPT2Config
-from datamodule_synthetic_jets import SyntheticJets
-
+from datamodule_jetclass import JetSequence
 
 class JetGPT2Model(L.LightningModule):
     def __init__(
@@ -163,7 +163,7 @@ class JetGPT2Model(L.LightningModule):
     #...prediction funcs
 
     @torch.no_grad()
-    def compute_log_probs(self, batch, preprocessed=False):
+    def compute_log_probs(self, batch, include_symmetry_terms=False):
 
         batch_ids  = batch["input_ids"].squeeze(1)
         batch_mask =  batch["attention_mask"].squeeze(1)
@@ -172,7 +172,7 @@ class JetGPT2Model(L.LightningModule):
         targets[targets == self.pad_token] = -100  # CE ignores
 
         outputs = self.model(input_ids=batch_ids,
-                            attention_mask=batch_mask,
+                             attention_mask=batch_mask,
                             )
 
         logits = outputs.logits[:, :-1] # drop last token pred
@@ -184,7 +184,19 @@ class JetGPT2Model(L.LightningModule):
                                 ignore_index=-100,
                                 ).view(batch_ids.size(0), -1)
 
-        return logp.sum(dim=1)
+        logp = logp.sum(dim=1)
+
+        if include_symmetry_terms:  # add log(N!):
+
+            jet_seq = JetSequence(start_token=self.start_token,
+                                  end_token= self.end_token,
+                                  pad_token=self.pad_token,) 
+
+            N = jet_seq.multiplicities(batch_ids.cpu().numpy())
+            logp_sym = torch.tensor([np.sum(gammaln(n + 1)) for n in N])  
+            logp += torch.tensor(logp_sym, device=logp.device, dtype=logp.dtype)
+            
+        return logp
 
 
     @torch.no_grad()
@@ -192,11 +204,15 @@ class JetGPT2Model(L.LightningModule):
         self.model.eval().to(device)
 
         # prepend BOS
-        seq = torch.cat([torch.tensor([self.start_token], device=device), seq.to(device)])
+        # seq = torch.cat([torch.tensor([self.start_token], device=device), seq.to(device)])
+        seq = seq.to(device)
         inp = seq[:-1].unsqueeze(0)
+        mask = (seq[:-1] != self.pad_token).unsqueeze(0).long()
         tgt = seq[1:].unsqueeze(0)
 
-        logits = self.model(input_ids=inp).logits
+        logits = self.model(input_ids=inp, 
+                            attention_mask=mask).logits
+                            
         log_probs = F.log_softmax(logits, dim=-1)
         token_log_probs = log_probs.gather(2, tgt.unsqueeze(-1)).squeeze(-1).squeeze(0)
         preds = logits.argmax(dim=-1).squeeze(0)
