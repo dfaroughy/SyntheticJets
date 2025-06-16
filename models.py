@@ -5,7 +5,7 @@ import pytorch_lightning as L
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn.functional as F
-from scipy.special import gammaln, gamma
+from scipy.special import gammaln, gamma, factorial
 
 from transformers import GPT2LMHeadModel, GPT2Config
 from datamodule_jetclass import JetSequence
@@ -28,6 +28,7 @@ class JetGPT2Model(L.LightningModule):
         top_k=None,
         temperature=1.0,
         pos_encoding=True,
+        log_dvol=-7.4212790,  # dvol = dpt * deta * dphi volume element
     ):
         super().__init__()
 
@@ -45,7 +46,9 @@ class JetGPT2Model(L.LightningModule):
         # special IDs
         self.start_token = self.vocab_size
         self.end_token = self.vocab_size + 1
-        self.pad_token = self.vocab_size + 2       
+        self.pad_token = self.vocab_size + 2   
+
+        self.log_dvol = log_dvol       
 
         config = GPT2Config(
             vocab_size=self.vocab_size + 3, # token vocab + BOS + EOS + pads
@@ -165,8 +168,10 @@ class JetGPT2Model(L.LightningModule):
     @torch.no_grad()
     def compute_log_probs(self, batch, include_symmetry_terms=False):
 
-        batch_ids  = batch["input_ids"].squeeze(1)
-        batch_mask =  batch["attention_mask"].squeeze(1)
+        self.model.eval()
+        
+        batch_ids  = batch["input_ids"]#.squeeze(1)
+        batch_mask =  batch["attention_mask"]#.squeeze(1)
 
         targets = batch_ids.clone()
         targets[targets == self.pad_token] = -100  # CE ignores
@@ -193,9 +198,12 @@ class JetGPT2Model(L.LightningModule):
                                   pad_token=self.pad_token,) 
 
             N = jet_seq.multiplicities(batch_ids.cpu().numpy())
-            logp_sym = torch.tensor([np.sum(gammaln(n + 1)) for n in N])  
-            logp += torch.tensor(logp_sym, device=logp.device, dtype=logp.dtype)
-            
+            logp_sym = torch.log(torch.tensor(factorial(N)))
+            logp_repeats = jet_seq.log_symmetry_factor(batch_ids.cpu().numpy())
+            logp -= torch.tensor(logp_sym, device=logp.device, dtype=logp.dtype)   # - log(N!)
+            logp += torch.tensor(logp_repeats, device=logp.device, dtype=logp.dtype) # sum_k log(N_k!) where N_k is multiplicity of k-th pt bin
+            logp -= torch.tensor( N * (self.log_dvol), device=logp.device, dtype=logp.dtype) # - N * log(dvol) volume factor
+
         return logp
 
 
