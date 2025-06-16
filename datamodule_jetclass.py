@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from scipy.integrate import quad
-from scipy.special import gammaln, gamma
+from scipy.special import factorial
 from torch.utils.data import Dataset
 import h5py
 import pandas as pd
@@ -13,6 +13,7 @@ class JetSequence:
         data: np.ndarray = None,
         filepath: str = None,
         num_jets: int = None,
+        num_jets_min: int = 0,
         max_seq_length: int = 200,  # maximum number of constituents
         bins: list = [41, 31, 31],
         start_token: int = None,
@@ -27,6 +28,7 @@ class JetSequence:
         self.pad_token = pad_token
         self.filepath = filepath
         self.num_jets = num_jets
+        self.num_jets_mim = num_jets_min
         self.bins = bins
         self.max_seq_length = max_seq_length
 
@@ -43,7 +45,7 @@ class JetSequence:
     def _load_data(self, key='discretized/block0_values'):
         with h5py.File(self.filepath, "r") as f:
             arr = f[key]
-            sample = arr[:] if self.num_jets is None else arr[: self.num_jets]
+            sample = arr[:] if self.num_jets is None else arr[self.num_jets_mim : self.num_jets]
         N = sample.shape[0]
         return sample.reshape(N, -1, len(self.bins))  # (N, D, 3)
 
@@ -103,9 +105,9 @@ class JetSequence:
         log_S = np.zeros(N, dtype=float)
 
         for i in range(N):
-            _, counts = np.unique(pt_bins[i], return_counts=True)
+            _, counts = np.unique(pt_bins[i][pt_bins[i] > -1], return_counts=True)
             counts = counts[counts > 1]
-            log_S[i] = np.sum(gammaln(counts + 1))
+            log_S[i] = np.sum(np.log(factorial(counts)))
 
         return log_S
     
@@ -123,6 +125,7 @@ class JetSequenceDataset(Dataset):
         filepath: str=None,
         input_ids: str=None,
         num_jets: int = None,
+        num_jets_min: int = 0,
         max_seq_length: int = 200,
         bins: list = [41, 31, 31],
     ):
@@ -135,6 +138,7 @@ class JetSequenceDataset(Dataset):
 
             seq_builder = JetSequence(filepath=filepath,
                                     num_jets=num_jets,
+                                    num_jets_min=num_jets_min,
                                     max_seq_length=max_seq_length,
                                     bins=bins,
                                     start_token=start_token,
@@ -147,7 +151,7 @@ class JetSequenceDataset(Dataset):
             self.attention_mask = (self.input_ids != pad_token).long()
         
         else:
-            self.input_ids = input_ids[:num_jets]
+            self.input_ids = input_ids[num_jets_min : num_jets]
             self.attention_mask = (self.input_ids != pad_token).long()
 
     def __len__(self):
