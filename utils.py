@@ -99,24 +99,31 @@ class GeneratorCallback(Callback):
 
         #...get test and Aachen data for comparison:
 
-        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5', max_seq_length=self.max_seq_length)
+        # test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5', max_seq_length=self.max_seq_length)
+        test_seq = JetSequence(filepath=f'{self.data_dir}/train_12M_EPiC_FM_binned/{self.jet_type}_EPiC_FM_bins403030.h5', 
+                               max_seq_length=self.max_seq_length,
+                               num_jets_min=10_500_000,
+                               num_jets=11_500_000,  
+                               )
+
+
         test_disc = binnify(torch.tensor(test_seq.data[:N]).long(), self.data_dir)
         # test_cont = torch.tensor(test_seq.raw[:N]).long()
 
-        aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', max_seq_length=self.max_seq_length)
-        aachen = binnify(torch.tensor(aachen_seq.data[:N]).long(), self.data_dir)
+        # aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', max_seq_length=self.max_seq_length)
+        # aachen = binnify(torch.tensor(aachen_seq.data[:N]).long(), self.data_dir)
 
         #...plot:
 
         plot_kin_with_ratio(test_disc, #test_cont,
                            gen, 
-                           aachen, 
+                        #    aachen, 
                            path=path + '/particle_level_obs.png', 
                            jet=f'{self.jet_type}')
 
         plot_hl_with_ratio(test_disc, #test_cont,
                            gen, 
-                           aachen, 
+                        #    aachen, 
                            path=path + '/jet_level_obs.png',
                            jet=f'{self.jet_type}')
 
@@ -389,13 +396,15 @@ def jets_HighLevelFeats(sample):
     return np.stack([jet_pt, jet_eta, jet_phi, jet_mass], axis=-1)
 
 
-def plot_kin_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_plot.png', jet='jetclass'):
+def plot_kin_with_ratio(test_disc, gen, aachen=None, test_cont=None, path='results_plot.png', jet='jetclass'):
 
     if test_cont is not None:
         test_cont = test_cont.cpu().numpy()
     test_disc = test_disc.cpu().numpy()
     gen = gen.cpu().numpy()
-    aachen = aachen.cpu().numpy()
+    
+    if aachen is not None:
+        aachen = aachen.cpu().numpy()
 
     bins = [np.arange(-1, 7, 0.2), 
             np.arange(-1, 1, 0.05), 
@@ -414,7 +423,8 @@ def plot_kin_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_pl
         sns.histplot(np.log(test_cont[test_cont[...,0]>0][...,0]),bins=bins[0],lw=0.4, fill=False, ls=':',  color='k',  label=jet, element='step', stat='density', ax=ax0)
     sns.histplot(np.log(test_disc[test_disc[...,0]>0][...,0]),bins=bins[0],lw=0.4,fill=True,  color='k', alpha=0.2,  label=jet, element='step', stat='density', ax=ax0)
     sns.histplot(np.log(gen[gen[...,0]>0][...,0]), bins=bins[0], lw=0.8, fill=False, color='crimson', label='GPT2 Rutgers',element='step', stat='density', ax=ax0)
-    sns.histplot(np.log(aachen[aachen[...,0]>0][...,0]), bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
+    if aachen is not None:
+        sns.histplot(np.log(aachen[aachen[...,0]>0][...,0]), bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
     ax0.set_ylabel('density', fontsize=12)
     ax0.legend(fontsize=6)
     ax0.set_ylim(0, ylims[0])
@@ -424,7 +434,8 @@ def plot_kin_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_pl
         sns.histplot(test_cont[test_cont[...,0]>0][...,1], bins=bins[1], lw=0.4, fill=False, ls=':',  color='k',  element='step', stat='density', ax=ax1)
     sns.histplot(test_disc[test_disc[...,0]>0][...,1], bins=bins[1], lw=0.4, fill=True,  color='k', alpha=0.2,  element='step', stat='density', ax=ax1)
     sns.histplot(gen[gen[...,0]>0][...,1],  bins=bins[1], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax1)
-    sns.histplot(aachen[aachen[...,0]>0][...,1], bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
+    if aachen is not None:
+        sns.histplot(aachen[aachen[...,0]>0][...,1], bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
     ax1.set_ylabel(' ', fontsize=12)
     ax1.set_ylim(0, ylims[1])
 
@@ -433,14 +444,16 @@ def plot_kin_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_pl
         sns.histplot(test_cont[test_cont[...,0]>0][...,2], bins=bins[2], lw=0.4, fill=False,  ls=':', color='k', element='step', stat='density', ax=ax2)    
     sns.histplot(test_disc[test_disc[...,0]>0][...,2], bins=bins[2], lw=0.4, fill=True,  color='k',  alpha=0.2, element='step', stat='density', ax=ax2)
     sns.histplot(gen[gen[...,0]>0][...,2],  bins=bins[2], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax2)
-    sns.histplot(aachen[aachen[...,0]>0][...,2], bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
+    if aachen is not None:
+        sns.histplot(aachen[aachen[...,0]>0][...,2], bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
     ax2.set_ylabel(' ', fontsize=12)
     ax2.set_ylim(0, ylims[2])
 
     ax3 = fig.add_subplot(gs[0,3])
     sns.histplot((test_disc[...,0] > 0).sum(axis=1),  bins=bins[3], lw=0.4, fill=True,  color='k', alpha=0.2,element='step', stat='density', ax=ax3)
     sns.histplot((gen[...,0] > 0).sum(axis=1),  bins=bins[3], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax3)
-    sns.histplot((aachen[...,0] > 0).sum(axis=1),  bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
+    if aachen is not None:
+        sns.histplot((aachen[...,0] > 0).sum(axis=1),  bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
     ax3.set_ylabel(' ', fontsize=12)
     ax3.set_ylim(0, ylims[3])
 
@@ -448,11 +461,13 @@ def plot_kin_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_pl
 
     h0_t, e0 = np.histogram(np.log(test_disc[test_disc[...,0]>0][...,0]), bins=bins[0],      density=True)
     h0_g, _  = np.histogram(np.log(gen[gen[...,0]>0][...,0]),  bins=e0,         density=True)
-    h0_a, _  = np.histogram(np.log(aachen[aachen[...,0]>0][...,0]), bins=e0,       density=True)
+    if aachen is not None:
+        h0_a, _  = np.histogram(np.log(aachen[aachen[...,0]>0][...,0]), bins=e0,       density=True)
     centers0 = 0.5*(e0[:-1] + e0[1:])
     ax0r = fig.add_subplot(gs[1,0], sharex=ax0)
     ax0r.step(centers0, h0_g/(h0_t+1e-8), where='mid', color='crimson', lw=1)
-    ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
+    if aachen is not None:
+        ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
     ax0r.set_ylim(0.7,1.3)
     ax0r.set_xlabel(r'$\log(p_T)$')
     ax0r.set_ylabel('ratio', fontsize=8)
@@ -460,33 +475,39 @@ def plot_kin_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_pl
 
     h1_t, e1 = np.histogram(test_disc[test_disc[...,0]>0][...,1], bins=bins[1], density=True)
     h1_g, _  = np.histogram(gen[gen[...,0]>0][...,1],  bins=e1, density=True)
-    h1_a, _  = np.histogram(aachen[aachen[...,0]>0][...,1], bins=e1, density=True)
+    if aachen is not None:
+        h1_a, _  = np.histogram(aachen[aachen[...,0]>0][...,1], bins=e1, density=True)
     centers1 = 0.5*(e1[:-1] + e1[1:])
     ax1r = fig.add_subplot(gs[1,1], sharex=ax1)
     ax1r.step(centers1, h1_g/(h1_t+1e-8), where='mid',color='crimson',lw=1)
-    ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid',   lw=1)
+    if aachen is not None:
+        ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid',   lw=1)
     ax1r.axhline(y=1, color='k', linestyle='--', lw=0.75)
     ax1r.set_ylim(0.7,1.3)
     ax1r.set_xlabel(r'$\Delta\eta$')
 
     h2_t, e2 = np.histogram(test_disc[test_disc[...,0]>0][...,2], bins=bins[2],      density=True)
     h2_g, _  = np.histogram(gen[gen[...,0]>0][...,2],  bins=e2,         density=True)
-    h2_a, _  = np.histogram(aachen[aachen[...,0]>0][...,2], bins=e2,       density=True)
+    if aachen is not None:
+        h2_a, _  = np.histogram(aachen[aachen[...,0]>0][...,2], bins=e2,       density=True)
     centers2 = 0.5*(e2[:-1] + e2[1:])
     ax2r = fig.add_subplot(gs[1,2], sharex=ax2)
     ax2r.step(centers2, h2_g/(h2_t+1e-8), where='mid', color='crimson',lw=1)
-    ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
+    if aachen is not None:
+        ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
     ax2r.axhline(y=1, color='k', linestyle='--', lw=0.75)
     ax2r.set_ylim(0.7,1.3)
     ax2r.set_xlabel(r'$\Delta\phi$')
 
     h3_t, e3 = np.histogram((test_disc[...,0] > 0).sum(axis=1), bins=bins[3], density=True)
     h3_g, _  = np.histogram((gen[...,0] > 0).sum(axis=1),  bins=e3,  density=True)
-    h3_a, _  = np.histogram((aachen[...,0] > 0).sum(axis=1), bins=e3,density=True)
+    if aachen is not None:
+        h3_a, _  = np.histogram((aachen[...,0] > 0).sum(axis=1), bins=e3,density=True)
     centers3 = 0.5*(e3[:-1] + e3[1:])
     ax3r = fig.add_subplot(gs[1,3], sharex=ax3)
     ax3r.step(centers3, h3_g/(h3_t+1e-8), where='mid',color='crimson',lw=1)
-    ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
+    if aachen is not None:
+        ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
     ax3r.axhline(y=1, color='k', linestyle='--', lw=0.75)
     ax3r.set_ylim(0.7,1.3)
     ax3r.set_xlabel(r'$N$')
@@ -495,14 +516,16 @@ def plot_kin_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_pl
     plt.savefig(path, dpi=500, bbox_inches='tight')
 
 
-def plot_hl_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_plot.png', jet='jetclass'):
+def plot_hl_with_ratio(test_disc, gen, aachen=None, test_cont=None, path='results_plot.png', jet='jetclass'):
 
     gen_HL = jets_HighLevelFeats(gen)
-    aachen_HL = jets_HighLevelFeats(aachen)
+    if aachen is not None:
+        aachen_HL = jets_HighLevelFeats(aachen)
     test_disc_HL = jets_HighLevelFeats(test_disc)
 
     gen_substructure = JetSubstructure(gen)
-    aachen_substructure = JetSubstructure(aachen)
+    if aachen is not None:
+        aachen_substructure = JetSubstructure(aachen)
     test_disc_substructure = JetSubstructure(test_disc)
 
     if test_cont is not None:
@@ -526,7 +549,8 @@ def plot_hl_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_plo
         sns.histplot(test_cont_HL[...,0],bins=bins[0],lw=0.4,fill=False, ls=':', color='k',  label=jet, element='step', stat='density', ax=ax0)
     sns.histplot(test_disc_HL[...,0],bins=bins[0],lw=0.4,fill=True,  color='k', alpha=0.2,  label=jet + ' binned', element='step', stat='density', ax=ax0)
     sns.histplot(gen_HL[...,0], bins=bins[0], lw=0.8, fill=False, color='crimson', label='GPT2 Rutgers',element='step', stat='density', ax=ax0)
-    sns.histplot(aachen_HL[...,0], bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
+    if aachen is not None:
+        sns.histplot(aachen_HL[...,0], bins=bins[0], lw=0.8, fill=False, label='GPT2 Aachen',element='step', stat='density', ax=ax0)
     ax0.set_ylabel('density', fontsize=12)
     ax0.set_ylim(0, ylims[0])
     ax0.legend(fontsize=7)
@@ -536,7 +560,8 @@ def plot_hl_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_plo
         sns.histplot(test_cont_HL[...,3], bins=bins[1], lw=0.4, fill=False, ls=':', color='k',  element='step', stat='density', ax=ax1)
     sns.histplot(test_disc_HL[...,3], bins=bins[1], lw=0.4, fill=True,  color='k', alpha=0.2,  element='step', stat='density', ax=ax1)
     sns.histplot(gen_HL[...,3],  bins=bins[1], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax1)
-    sns.histplot(aachen_HL[...,3], bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
+    if aachen is not None:
+        sns.histplot(aachen_HL[...,3], bins=bins[1], lw=0.8, fill=False, element='step', stat='density', ax=ax1)
     ax1.set_ylabel(' ', fontsize=12)
     ax1.set_ylim(0, ylims[1])
 
@@ -545,7 +570,8 @@ def plot_hl_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_plo
         sns.histplot(test_cont_substructure.tau21, bins=bins[2], lw=0.4, fill=False,  color='k', ls=':', element='step', stat='density', ax=ax2)
     sns.histplot(test_disc_substructure.tau21, bins=bins[2], lw=0.4, fill=True,  color='k',  alpha=0.2, element='step', stat='density', ax=ax2)    
     sns.histplot(gen_substructure.tau21,  bins=bins[2], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax2)
-    sns.histplot(aachen_substructure.tau21, bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
+    if aachen is not None:
+        sns.histplot(aachen_substructure.tau21, bins=bins[2], lw=0.8, fill=False,element='step', stat='density', ax=ax2)
     ax2.set_ylabel(' ', fontsize=12)
     ax2.set_ylim(0, ylims[2])
 
@@ -554,7 +580,8 @@ def plot_hl_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_plo
         sns.histplot(test_cont_substructure.tau32, bins=bins[3], lw=0.4, fill=False,  color='k', ls=':', element='step', stat='density', ax=ax3)
     sns.histplot(test_disc_substructure.tau32, bins=bins[3], lw=0.4, fill=True,  color='k', alpha=0.2,element='step', stat='density', ax=ax3)
     sns.histplot(gen_substructure.tau32,  bins=bins[3], lw=0.8, fill=False, color='crimson', element='step', stat='density', ax=ax3)
-    sns.histplot(aachen_substructure.tau32, bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
+    if aachen is not None:
+        sns.histplot(aachen_substructure.tau32, bins=bins[3], lw=0.8, fill=False, label='aachen',element='step', stat='density', ax=ax3)
     ax3.set_ylabel(' ', fontsize=12)
     ax3.set_ylim(0, ylims[3])
 
@@ -562,11 +589,13 @@ def plot_hl_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_plo
 
     h0_t, e0 = np.histogram(test_disc_HL[...,0], bins=bins[0],      density=True)
     h0_g, _  = np.histogram(gen_HL[...,0],  bins=e0,         density=True)
-    h0_a, _  = np.histogram(aachen_HL[...,0], bins=e0,       density=True)
+    if aachen is not None:
+        h0_a, _  = np.histogram(aachen_HL[...,0], bins=e0,       density=True)
     centers0 = 0.5*(e0[:-1] + e0[1:])
     ax0r = fig.add_subplot(gs[1,0], sharex=ax0)
     ax0r.step(centers0, h0_g/(h0_t+1e-8), where='mid', color='crimson', lw=1)
-    ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
+    if aachen is not None:
+        ax0r.step(centers0, h0_a/(h0_t+1e-8), where='mid',  lw=1)
     ax0r.set_ylim(0.7,1.3)
     ax0r.set_xlabel(r'jet $p_T$')
     ax0r.set_ylabel('ratio', fontsize=8)
@@ -574,33 +603,39 @@ def plot_hl_with_ratio(test_disc, gen, aachen, test_cont=None, path='results_plo
 
     h1_t, e1 = np.histogram(test_disc_HL[...,3], bins=bins[1], density=True)
     h1_g, _  = np.histogram(gen_HL[...,3],  bins=e1, density=True)
-    h1_a, _  = np.histogram(aachen_HL[...,3], bins=e1, density=True)
+    if aachen is not None:
+        h1_a, _  = np.histogram(aachen_HL[...,3], bins=e1, density=True)
     centers1 = 0.5*(e1[:-1] + e1[1:])
     ax1r = fig.add_subplot(gs[1,1], sharex=ax1)
     ax1r.step(centers1, h1_g/(h1_t+1e-8), where='mid',color='crimson',lw=1)
-    ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid',   lw=1)
+    if aachen is not None:
+        ax1r.step(centers1, h1_a/(h1_t+1e-8), where='mid',   lw=1)
     ax1r.axhline(y=1, color='k', linestyle='--', lw=0.75)
     ax1r.set_ylim(0.7,1.3)
     ax1r.set_xlabel(r'jet mass')
 
     h2_t, e2 = np.histogram(test_disc_substructure.tau21, bins=bins[2],      density=True)
     h2_g, _  = np.histogram(gen_substructure.tau21,  bins=e2,         density=True)
-    h2_a, _  = np.histogram(aachen_substructure.tau21, bins=e2,       density=True)
+    if aachen is not None:
+        h2_a, _  = np.histogram(aachen_substructure.tau21, bins=e2,       density=True)
     centers2 = 0.5*(e2[:-1] + e2[1:])
     ax2r = fig.add_subplot(gs[1,2], sharex=ax2)
     ax2r.step(centers2, h2_g/(h2_t+1e-8), where='mid', color='crimson',lw=1)
-    ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
+    if aachen is not None:
+        ax2r.step(centers2, h2_a/(h2_t+1e-8), where='mid',  lw=1)
     ax2r.axhline(y=1, color='k', linestyle='--', lw=0.75)
     ax2r.set_ylim(0.7,1.3)
     ax2r.set_xlabel(r'$\tau_{21}$')
 
     h3_t, e3 = np.histogram(test_disc_substructure.tau32, bins=bins[3],      density=True)
     h3_g, _  = np.histogram(gen_substructure.tau32,  bins=e3,         density=True)
-    h3_a, _  = np.histogram(aachen_substructure.tau32, bins=e3,       density=True)
+    if aachen is not None:
+        h3_a, _  = np.histogram(aachen_substructure.tau32, bins=e3,       density=True)
     centers3 = 0.5*(e3[:-1] + e3[1:])
     ax3r = fig.add_subplot(gs[1,3], sharex=ax3)
     ax3r.step(centers3, h3_g/(h3_t+1e-8), where='mid',color='crimson',lw=1)
-    ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
+    if aachen is not None:
+        ax3r.step(centers3, h3_a/(h3_t+1e-8), where='mid',   lw=1)
     ax3r.axhline(y=1, color='k', linestyle='--', lw=0.75)
     ax3r.set_ylim(0.7,1.3)
     ax3r.set_xlabel(r'$\tau_{32}$')

@@ -10,6 +10,12 @@ from foundation_model import JetGPT2DoubleHeads
 from datamodule_jetclass import JetSequenceDataset
 
 ##########################################################################
+
+"""
+training script for the JetGPT2Model on Generate EPiC-FM data
+
+"""
+
 parser = ArgumentParser()
 parser.add_argument("--num_nodes", "-N", type=int, default=1)
 parser.add_argument("--dir", type=str, default='/pscratch/sd/d/dfarough')
@@ -21,7 +27,7 @@ parser.add_argument("--experiment_id", "-id", type=str, default=None)
 parser.add_argument("--tags", type=str, nargs='*')
 
 parser.add_argument("--jet_type", "-type", type=str, default='ZJetsToNuNu')
-parser.add_argument("--max_seq_length", "-len", type=int, default=200)
+parser.add_argument("--max_seq_length", "-len", type=int, default=40)
 parser.add_argument("--nBins", "-bins", type=int, nargs=3)
 parser.add_argument("--batch_size", "-bs", type=int, default=128)
 
@@ -37,7 +43,7 @@ parser.add_argument("--dropout_residual", "-do_res", type=float, default=0.1)
 
 parser.add_argument("--lr", type=float, default=0.001)
 parser.add_argument("--lr_final", type=float, default=0.0001)
-parser.add_argument("--max_epochs", "-epochs", type=int, default=50)
+parser.add_argument("--max_epochs", "-epochs", type=int, default=100)
 
 config = parser.parse_args()
 ##########################################################################
@@ -52,11 +58,15 @@ logger = CometLogger(
 
 logger.experiment.add_tags(config.tags)
 
-train_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_100M_binned/train_{config.jet_type}_10M_bins403030.h5", max_seq_length=config.max_seq_length)
-val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/val_5M_binned/val_{config.jet_type}_500K_bins403030.h5", max_seq_length=config.max_seq_length)
+train_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_12M_EPiC_FM_binned/{config.jet_type}_EPiC_FM_bins403030.h5", 
+                                  max_seq_length=config.max_seq_length,
+                                  num_jets_min=0,
+                                  num_jets=10_000_000,)
 
-train_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_100M_binned/train_{config.jet_type}_10M_bins403030.h5", max_seq_length=config.max_seq_length)
-val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/val_5M_binned/val_{config.jet_type}_500K_bins403030.h5", max_seq_length=config.max_seq_length)
+val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_12M_EPiC_FM_binned/{config.jet_type}_EPiC_FM_bins403030.h5", 
+                                  max_seq_length=config.max_seq_length,
+                                  num_jets_min=10_000_000,
+                                  num_jets=10_500_000,)
 
 train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
 val_loader   = DataLoader(val_dataset,   batch_size=config.batch_size, shuffle=False)
