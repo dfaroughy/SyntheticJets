@@ -74,7 +74,7 @@ class GeneratorCallback(Callback):
         print(f'\nINFO: generated {data_tokens.shape[0]} jet sequences')
         print(f'INFO: data saved in {self.experiment_dir}/{self.predict_type}_results_{self.tag}')
 
-        Jets = JetSequence()
+        Jets = JetSequence(max_seq_length=self.max_seq_length)
         data_tokens = torch.where(data_tokens>=self.start_token, -1 * torch.ones_like(data_tokens), data_tokens)
         data_binned = binnify(Jets.seq_to_bins_decoding(data_tokens[:, 1:]), self.data_dir) # rm start token
 
@@ -283,6 +283,8 @@ class JetSubstructure:
 def binnify(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass', make_continuous=False):
 
     """
+    Take digitized log(pt), eta, phi bins data and maps to physical space
+
     log(pt) bins:  
     
     [-0.76029712 -0.56371887 -0.36714061 -0.17056236  0.0260159   0.22259415
@@ -316,61 +318,63 @@ def binnify(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass', make_continuous=Fa
     eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
     phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
 
-    print(len(pt_bins), len(eta_bins), len(phi_bins))
-
     pt_disc = jets[:, :, 0]
     eta_disc = jets[:, :, 1]
     phi_disc = jets[:, :, 2]
 
-    mask = pt_disc < 0
+    # rm pads or eos/bos tokens
+    mask1 = pt_disc > len(pt_bins) 
+    mask2 = pt_disc < 0
 
     d_pt = np.abs(pt_bins[1] - pt_bins[0])
     d_eta = np.abs(eta_bins[1] - eta_bins[0])
     d_phi = np.abs(phi_bins[1] - phi_bins[0])
 
     if make_continuous:
-        pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * d_pt + pt_bins[0]
-        eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * d_eta + eta_bins[0]
-        phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * d_phi + phi_bins[0]
+        pt_con = (pt_disc + np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * d_pt + pt_bins[0]
+        eta_con = (eta_disc + np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * d_eta + eta_bins[0]
+        phi_con = (phi_disc + np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * d_phi + phi_bins[0]
     
     else:
-        pt_con = pt_disc * d_pt + pt_bins[0]
-        eta_con = eta_disc * d_eta + eta_bins[0]
-        phi_con = phi_disc * d_phi + phi_bins[0]
+        pt_con = (pt_disc + 0.5) * d_pt + pt_bins[0]
+        eta_con = (eta_disc + 0.5) * d_eta + eta_bins[0]
+        phi_con = (phi_disc + 0.5) * d_phi + phi_bins[0]
 
-    continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
-    continues_jets[mask] = 0
+    jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
+    jets[mask1] = 0
+    jets[mask2] = 0
+    jets = jets[:, 1:-1, :]  # remove start and end tokens
 
-    return torch.tensor(continues_jets)
+    return torch.tensor(jets)
 
 
-def make_continuous(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass'):
-    pt_bins = np.load(f"{bin_dir}/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
-    eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
-    phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
+# def make_continuous(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass'):
+#     pt_bins = np.load(f"{bin_dir}/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
+#     eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
+#     phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
 
-    pt_disc = jets[:, :, 0]
-    eta_disc = jets[:, :, 1]
-    phi_disc = jets[:, :, 2]
+#     pt_disc = jets[:, :, 0]
+#     eta_disc = jets[:, :, 1]
+#     phi_disc = jets[:, :, 2]
 
-    mask = pt_disc < 0
+#     mask = pt_disc < 0
 
-    pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * (
-        pt_bins[1] - pt_bins[0]
-    ) + pt_bins[0]
+#     pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * (
+#         pt_bins[1] - pt_bins[0]
+#     ) + pt_bins[0]
 
-    eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * (
-        eta_bins[1] - eta_bins[0]
-    ) + eta_bins[0]
+#     eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * (
+#         eta_bins[1] - eta_bins[0]
+#     ) + eta_bins[0]
     
-    phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * (
-        phi_bins[1] - phi_bins[0]
-    ) + phi_bins[0]
+#     phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * (
+#         phi_bins[1] - phi_bins[0]
+#     ) + phi_bins[0]
 
-    continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
-    continues_jets[mask] = 0
+#     continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
+#     continues_jets[mask] = 0
 
-    return torch.tensor(continues_jets)
+#     return torch.tensor(continues_jets)
 
 
 def jets_HighLevelFeats(sample):
