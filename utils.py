@@ -99,31 +99,33 @@ class GeneratorCallback(Callback):
 
         #...get test and Aachen data for comparison:
 
-        # test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5', max_seq_length=self.max_seq_length)
-        test_seq = JetSequence(filepath=f'{self.data_dir}/train_12M_EPiC_FM_binned/{self.jet_type}_EPiC_FM_bins403030.h5', 
-                               max_seq_length=self.max_seq_length,
-                               num_jets_min=10_500_000,
-                               num_jets=11_500_000,  
-                               )
+        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5', 
+                               max_seq_length=self.max_seq_length)
+
+        # test_seq = JetSequence(filepath=f'{self.data_dir}/train_12M_EPiC_FM_binned/{self.jet_type}_EPiC_FM_bins403030.h5', 
+        #                        max_seq_length=self.max_seq_length,
+        #                        num_jets_min=10_500_000,
+        #                        num_jets=11_500_000,  
+        #                        )
 
 
         test_disc = binnify(torch.tensor(test_seq.data[:N]).long(), self.data_dir)
-        # test_cont = torch.tensor(test_seq.raw[:N]).long()
 
-        # aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', max_seq_length=self.max_seq_length)
-        # aachen = binnify(torch.tensor(aachen_seq.data[:N]).long(), self.data_dir)
+        aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', 
+                                 max_seq_length=self.max_seq_length)
+        aachen = binnify(torch.tensor(aachen_seq.data[:N]).long(), self.data_dir)
 
         #...plot:
 
-        plot_kin_with_ratio(test_disc, #test_cont,
+        plot_kin_with_ratio(test_disc,
                            gen, 
-                        #    aachen, 
+                           aachen, 
                            path=path + '/particle_level_obs.png', 
                            jet=f'{self.jet_type}')
 
-        plot_hl_with_ratio(test_disc, #test_cont,
+        plot_hl_with_ratio(test_disc, 
                            gen, 
-                        #    aachen, 
+                           aachen, 
                            path=path + '/jet_level_obs.png',
                            jet=f'{self.jet_type}')
 
