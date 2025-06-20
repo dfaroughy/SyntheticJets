@@ -140,7 +140,7 @@ class JetGPT2Model(L.LightningModule):
 
         elif self.predict_type == 'logp':
 
-            preds = self.compute_log_probs(batch) 
+            preds = self.compute_log_probs(batch, include_symmetry_terms=True) 
 
         return preds.detach().cpu()
  

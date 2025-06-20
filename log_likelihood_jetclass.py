@@ -32,17 +32,21 @@ config = parser.parse_args()
 model = JetGPT2Model.load_from_checkpoint(f"{config.dir}/{config.project_name}/{config.experiment_id}/checkpoints/{config.checkpoint}", map_location="cpu",)
 model.predict_type = config.predict_type
 
-seq = torch.tensor(np.load(f"{config.dir}/{config.project_name}/{config.eval_data_path}"))
-dataset = JetSequenceDataset(input_ids=seq, num_jets=config.num_jets, max_seq_length=model.max_seq_length)
+seq = torch.tensor(np.load(f"{config.dir}/{config.eval_data_path}"))
+dataset = JetSequenceDataset(input_ids=seq, 
+                             num_jets_min=11_990_000,
+                             num_jets=12_000_000, 
+                             max_seq_length=model.max_seq_length
+                             )
+                             
 dataloader = DataLoader(dataset, batch_size=config.batch_size, shuffle=False)
-
 callback = LogProbsCallback(config=config)
 
 #...compute log probs
 
 comp_log_probs = L.Trainer(accelerator="gpu", 
-                          devices='auto', 
-                          strategy='ddp', 
+                          devices=[0], 
+                        #   strategy='ddp', 
                           num_nodes=config.num_nodes, 
                           callbacks=[callback])
 
