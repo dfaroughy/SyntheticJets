@@ -28,7 +28,7 @@ class JetGPT2Model(L.LightningModule):
         top_k=None,
         temperature=1.0,
         pos_encoding=True,
-        log_dvol=-7.4212790,  # dvol = dpt * deta * dphi volume element
+        log_dvol= -7.421279091726184,  # dvol = dpt * deta * dphi volume element
     ):
         super().__init__()
 
