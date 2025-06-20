@@ -68,7 +68,7 @@ class JetGPT2Model(L.LightningModule):
         )
 
         self.model = GPT2LMHeadModel(config)
-        self.predict_type = 'gen'
+        self.predict_type = 'gen' # 'gen' or 'logp' modes
 
         # If pos_encoding is disabled, zero & freeze GPT-2's position embeddings:
 
@@ -170,11 +170,11 @@ class JetGPT2Model(L.LightningModule):
 
         self.model.eval()
         
-        batch_ids  = batch["input_ids"]#.squeeze(1)
-        batch_mask =  batch["attention_mask"]#.squeeze(1)
+        batch_ids  = batch["input_ids"] 
+        batch_mask =  batch["attention_mask"] 
 
         targets = batch_ids.clone()
-        targets[targets == self.pad_token] = -100  # CE ignores
+        targets[targets == self.pad_token] = -100  # for CE ignore_index
 
         outputs = self.model(input_ids=batch_ids,
                              attention_mask=batch_mask,
@@ -186,7 +186,7 @@ class JetGPT2Model(L.LightningModule):
         logp = -F.cross_entropy(logits.reshape(-1, logits.size(-1)),
                                 targets.reshape(-1),
                                 reduction="none",
-                                ignore_index=-100,
+                                ignore_index=-100, # ignore pad-tokens
                                 ).view(batch_ids.size(0), -1)
 
         logp = logp.sum(dim=1)
@@ -209,10 +209,9 @@ class JetGPT2Model(L.LightningModule):
 
     @torch.no_grad()
     def per_token_preds(self, seq, device=None):
+
         self.model.eval().to(device)
 
-        # prepend BOS
-        # seq = torch.cat([torch.tensor([self.start_token], device=device), seq.to(device)])
         seq = seq.to(device)
         inp = seq[:-1].unsqueeze(0)
         mask = (seq[:-1] != self.pad_token).unsqueeze(0).long()
@@ -233,44 +232,6 @@ class JetGPT2Model(L.LightningModule):
         labels = labels.clone()
         labels[labels == self.pad_token] = -100  # CE ignores
         return labels
-
-    # def _seq_pad(self, sample):    
-        
-    #     results = []
-        
-    #     for seq in sample:
-    #         if seq.numel() < self.max_seq_length:
-    #             seq = F.pad(seq, (0, self.max_seq_length - seq.numel()), value=self.pad_token)
-    #         else:
-    #             seq = seq[: self.max_seq_length]
-                
-    #         results.append(seq)
-        
-    #     return torch.stack(results)
-
-    # @torch.no_grad()
-    # def log_probs(self, sample, batch_size=256, device="cuda"):
-    #     ''' WARNING: input sample need to be preprocessed. 
-    #         i.e. with no end/start tokens and pads == -1
-    #     '''
-
-    #     self.model.eval()
-    #     self.model.to(device)
-
-    #     seq = sample.to(device)
-    #     attn_mask = (seq != -1).long()
-    #     dataset = TensorDataset(seq, attn_mask)
-    #     dataloader = DataLoader(dataset, batch_size=batch_size)
-    #     log_probs = []
-
-    #     for batch_ids, batch_mask in dataloader: 
-    #         batch_ids = batch_ids.to(device)
-    #         batch_mask = batch_mask.to(device)
-    #         logp = self._log_probs(batch_ids, batch_mask, preprocessed=True)
-    #         log_probs.append(logp.cpu())
-
-    #     return torch.cat(log_probs, dim=0)
-
 
 # class SyntheticJetGPT2Model(L.LightningModule):
 #     def __init__(
