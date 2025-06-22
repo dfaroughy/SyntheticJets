@@ -15,7 +15,7 @@ class JetSequence:
         num_jets: int = None,
         num_jets_min: int = 0,
         max_seq_length: int = 200,  # maximum number of constituents
-        bins: list = [41, 31, 31],
+        num_bins: list = [40, 30, 30],
         start_token: int = None,
         end_token: int = None,
         pad_token: int = -1,
@@ -29,7 +29,7 @@ class JetSequence:
         self.filepath = filepath
         self.num_jets = num_jets
         self.num_jets_mim = num_jets_min
-        self.bins = bins
+        self.num_bins = num_bins
         self.max_seq_length = max_seq_length
 
         if filepath is not None:
@@ -47,20 +47,20 @@ class JetSequence:
             arr = f[key]
             sample = arr[:] if self.num_jets is None else arr[self.num_jets_mim : self.num_jets]
         N = sample.shape[0]
-        return sample.reshape(N, -1, len(self.bins))  # (N, D, 3)
+        return sample.reshape(N, -1, len(self.num_bins))  # (N, D, 3)
 
     def bins_to_seq_encoding(self, x: np.ndarray) -> np.ndarray:
         # combine 3D bins into flat token IDs
         a = x[..., 0]
         b = x[..., 1]
         c = x[..., 2]
-        return (a * self.bins[1] + b) * self.bins[2] + c
+        return (a * self.num_bins[1] + b) * self.num_bins[2] + c
 
     def seq_to_bins_decoding(self, seq) -> np.ndarray:
         """
         Decode a 1-D sequence of token IDs back into bin triplets ids (a,b,c).
         """
-        pt, eta, phi = self.bins
+        pt, eta, phi = self.num_bins
         a = seq // (eta * phi)
         rem = seq % (eta * phi)
         b = rem // phi
@@ -127,12 +127,12 @@ class JetSequenceDataset(Dataset):
         num_jets: int = None,
         num_jets_min: int = 0,
         max_seq_length: int = 200,
-        bins: list = [41, 31, 31],
+        num_bins: list = [40, 30, 30],
     ):
-        num_bins = int(np.prod(bins))
-        start_token = num_bins    # BOS
-        end_token = num_bins + 1  # EOS
-        pad_token = num_bins + 2  # PAD
+        vocab_size = int(np.prod(num_bins))
+        start_token = vocab_size    # BOS
+        end_token = vocab_size + 1  # EOS
+        pad_token = vocab_size + 2  # PAD
 
         if filepath is not None: 
 
@@ -140,7 +140,7 @@ class JetSequenceDataset(Dataset):
                                     num_jets=num_jets,
                                     num_jets_min=num_jets_min,
                                     max_seq_length=max_seq_length,
-                                    bins=bins,
+                                    num_bins=num_bins,
                                     start_token=start_token,
                                     end_token=end_token,
                                     pad_token=pad_token,

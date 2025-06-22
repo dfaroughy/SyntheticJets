@@ -33,6 +33,12 @@ class GeneratorCallback(Callback):
     def on_predict_start(self, trainer, pl_module):
         self.batched_data = []
         self.predict_type = trainer.model.predict_type
+
+        self.num_bins = trainer.model.num_bins 
+        self.logpt_range = trainer.model.logpt_range
+        self.eta_range = trainer.model.eta_range
+        self.phi_range = trainer.model.phi_range
+
         self.start_token = trainer.model.start_token
         self.end_token = trainer.model.end_token
         self.pad_token = trainer.model.pad_token
@@ -74,9 +80,20 @@ class GeneratorCallback(Callback):
         print(f'\nINFO: generated {data_tokens.shape[0]} jet sequences')
         print(f'INFO: data saved in {self.experiment_dir}/{self.predict_type}_results_{self.tag}')
 
-        Jets = JetSequence(max_seq_length=self.max_seq_length)
+        Jets = JetSequence(max_seq_length=self.max_seq_length,
+                           num_bins=self.num_bins,
+                           start_token=self.start_token,
+                           end_token=self.end_token,
+                           pad_token=self.pad_token,)
+
         data_tokens = torch.where(data_tokens>=self.start_token, -1 * torch.ones_like(data_tokens), data_tokens)
-        data_binned = binnify(Jets.seq_to_bins_decoding(data_tokens[:, 1:]), self.data_dir) # rm start token
+        data_binned = binnify(jets=Jets.seq_to_bins_decoding(data_tokens[:, 1:]), 
+                              logpt_range=self.logpt_range, 
+                              eta_range=self.eta_range, 
+                              phi_range=self.phi_range, 
+                              num_bins=self.num_bins, 
+                              make_continuous=self.config.make_continuous
+                              )
 
         np.save(f'{self.experiment_dir}/{self.predict_type}_results_{self.tag}/{self.file_name}_binned.npy', data_binned)
         print(f'INFO: saved binned jets with shape {data_binned.shape}')
@@ -100,32 +117,56 @@ class GeneratorCallback(Callback):
         #...get test and Aachen data for comparison:
 
         test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5', 
-                               max_seq_length=self.max_seq_length)
+                               max_seq_length=self.max_seq_length,
+                               num_bins=self.num_bins,
+                               start_token=self.start_token,
+                               end_token=self.end_token,
+                               pad_token=self.pad_token,)
 
         # test_seq = JetSequence(filepath=f'{self.data_dir}/train_12M_EPiC_FM_binned/{self.jet_type}_EPiC_FM_bins403030.h5', 
         #                        max_seq_length=self.max_seq_length,
         #                        num_jets_min=10_500_000,
         #                        num_jets=11_500_000,  
+        #                        num_bins=self.num_bins,
+        #                        start_token=self.start_token,
+        #                        end_token=self.end_token,
+        #                        pad_token=self.pad_token,
         #                        )
 
+        test_disc = binnify(jets=torch.tensor(test_seq.data[:N]).long(),
+                            logpt_range=self.logpt_range, 
+                            eta_range=self.eta_range, 
+                            phi_range=self.phi_range, 
+                            num_bins=self.num_bins, 
+                            make_continuous=self.config.make_continuous
+                            )
 
-        test_disc = binnify(torch.tensor(test_seq.data[:N]).long(), self.data_dir)
+        # aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', 
+        #                          max_seq_length=self.max_seq_length,
+        #                          num_bins=self.num_bins,
+        #                          start_token=self.start_token,
+        #                          end_token=self.end_token,
+        #                          pad_token=self.pad_token,)
 
-        aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', 
-                                 max_seq_length=self.max_seq_length)
-        aachen = binnify(torch.tensor(aachen_seq.data[:N]).long(), self.data_dir)
+        # aachen = binnify(jets=torch.tensor(aachen_seq.data[:N]).long(), 
+        #                  logpt_range=self.logpt_range, 
+        #                  eta_range=self.eta_range, 
+        #                  phi_range=self.phi_range, 
+        #                  num_bins=self.num_bins, 
+        #                  make_continuous=self.config.make_continuous
+        #                  )
 
         #...plot:
 
         plot_kin_with_ratio(test_disc,
                            gen, 
-                           aachen, 
+                        #    aachen, 
                            path=path + '/particle_level_obs.png', 
                            jet=f'{self.jet_type}')
 
         plot_hl_with_ratio(test_disc, 
                            gen, 
-                           aachen, 
+                        #    aachen, 
                            path=path + '/jet_level_obs.png',
                            jet=f'{self.jet_type}')
 
@@ -282,7 +323,12 @@ class JetSubstructure:
 
 
 
-def binnify(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass', make_continuous=False):
+def binnify(jets, 
+            logpt_range=(-0.7602971186041831, 6.906254768371582),
+            eta_range=(-0.8, 0.8),
+            phi_range=(-0.8, 0.8), 
+            num_bins: list = [40, 30, 30],
+            make_continuous=False):
 
     """
     Take digitized log(pt), eta, phi bins data and maps to physical space
@@ -315,10 +361,14 @@ def binnify(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass', make_continuous=Fa
 
     """
 
+    # pt_bins = np.load(f"{bin_dir}/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
+    # eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
+    # phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
 
-    pt_bins = np.load(f"{bin_dir}/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
-    eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
-    phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
+
+    pt_bins = np.linspace(logpt_range[0], logpt_range[1], num_bins[0])
+    eta_bins = np.linspace(eta_range[0], eta_range[1], num_bins[1])
+    phi_bins = np.linspace(phi_range[0], phi_range[1], num_bins[2])
 
     pt_disc = jets[:, :, 0]
     eta_disc = jets[:, :, 1]

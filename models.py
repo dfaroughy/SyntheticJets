@@ -14,7 +14,10 @@ class JetGPT2Model(L.LightningModule):
     def __init__(
         self,
         max_seq_length: int = 200,
-        bins: list = [41, 31, 31],
+        logpt_range=(-0.7602971186041831, 6.906254768371582),
+        eta_range=(-0.8, 0.8),
+        phi_range=(-0.8, 0.8), 
+        num_bins=[40, 30, 30],
         n_embd=128,
         n_inner=None,
         n_layer=2,
@@ -28,14 +31,18 @@ class JetGPT2Model(L.LightningModule):
         top_k=None,
         temperature=1.0,
         pos_encoding=True,
-        log_dvol= -7.421279091726184,  # dvol = dpt * deta * dphi volume element
     ):
         super().__init__()
 
         # basic config
         self.max_seq_length = max_seq_length    # real tokens per jet
-        self.bins = bins
-        self.vocab_size = bins[0] * bins[1] * bins[2]
+        self.num_bins = num_bins
+        self.logpt_range = logpt_range
+        self.eta_range = eta_range
+        self.phi_range = phi_range
+        self.vocab_size = num_bins[0] * num_bins[1] * num_bins[2]
+
+        # model config
         self.lr = learning_rate
         self.lr_final = learning_rate_final
         self.do_sample = True  # sample multinomial
@@ -43,12 +50,23 @@ class JetGPT2Model(L.LightningModule):
         self.top_k = top_k
         self.pos_encoding = pos_encoding
 
-        # special IDs
+        # volume element:
+
+        dpt = np.abs(logpt_range[1] - logpt_range[0]) / num_bins[0] 
+        deta = np.abs(eta_range[1] - eta_range[0]) / num_bins[1]
+        dphi = np.abs(phi_range[1] - phi_range[0]) / num_bins[2]
+        self.dvol = dpt * deta * dphi  # log of the volume element 
+
+        print('INFO: bins:', num_bins)
+        print('INFO: vocab size:', self.vocab_size)
+        print('INFO: vol element dV=', self.dvol)
+        # self.log_dvol= -7.421279091726184, 
+
+        # special tokens:
+
         self.start_token = self.vocab_size
         self.end_token = self.vocab_size + 1
-        self.pad_token = self.vocab_size + 2   
-
-        self.log_dvol = log_dvol       
+        self.pad_token = self.vocab_size + 2  
 
         config = GPT2Config(
             vocab_size=self.vocab_size + 3, # token vocab + BOS + EOS + pads
@@ -70,9 +88,8 @@ class JetGPT2Model(L.LightningModule):
         self.model = GPT2LMHeadModel(config)
         self.predict_type = 'gen' # 'gen' or 'logp' modes
 
-        # If pos_encoding is disabled, zero & freeze GPT-2's position embeddings:
-
         if not self.pos_encoding:
+            # If pos_encoding is disabled, zero & freeze GPT-2's pos embeddings
             with torch.no_grad():
                 self.model.transformer.wpe.weight.zero_()
             self.model.transformer.wpe.weight.requires_grad = False
@@ -166,7 +183,7 @@ class JetGPT2Model(L.LightningModule):
     #...prediction funcs
 
     @torch.no_grad()
-    def compute_log_probs(self, batch, include_symmetry_terms=False):
+    def compute_log_probs(self, batch, symmetry_correction_terms=True):
 
         self.model.eval()
         
@@ -191,18 +208,20 @@ class JetGPT2Model(L.LightningModule):
 
         logp = logp.sum(dim=1)
 
-        if include_symmetry_terms:  # add log(N!):
+        if symmetry_correction_terms:
 
-            jet_seq = JetSequence(start_token=self.start_token,
+            jet_seq = JetSequence(max_seq_length=self.max_seq_length,
+                                  start_token=self.start_token,
                                   end_token= self.end_token,
-                                  pad_token=self.pad_token,) 
+                                  pad_token=self.pad_token,
+                                  num_bins=self.num_bins) 
 
             N = jet_seq.multiplicities(batch_ids.cpu().numpy())
             logp_sym = torch.log(torch.tensor(factorial(N)))
             logp_repeats = jet_seq.log_symmetry_factor(batch_ids.cpu().numpy())
             logp -= torch.tensor(logp_sym, device=logp.device, dtype=logp.dtype)   # - log(N!)
             logp += torch.tensor(logp_repeats, device=logp.device, dtype=logp.dtype) # sum_k log(N_k!) where N_k is multiplicity of k-th pt bin
-            logp -= torch.tensor( N * (self.log_dvol), device=logp.device, dtype=logp.dtype) # - N * log(dvol) volume factor
+            logp -= torch.tensor( N * np.log(self.dvol), device=logp.device, dtype=logp.dtype) # - N * log(dvol) volume factor
 
         return logp
 
