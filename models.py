@@ -13,11 +13,11 @@ from datamodule_jetclass import JetSequence
 class JetGPT2Model(L.LightningModule):
     def __init__(
         self,
+        num_bins=[41, 31, 31],
         max_seq_length: int = 40,
         logpt_range=(-0.7602971186041831, 6.906254768371582),
         eta_range=(-0.8, 0.8),
         phi_range=(-0.8, 0.8), 
-        num_bins=[40, 30, 30],
         n_embd=128,
         n_inner=None,
         n_layer=2,
@@ -52,9 +52,9 @@ class JetGPT2Model(L.LightningModule):
 
         # volume element:
 
-        dpt = np.abs(logpt_range[1] - logpt_range[0]) / num_bins[0] 
-        deta = np.abs(eta_range[1] - eta_range[0]) / num_bins[1]
-        dphi = np.abs(phi_range[1] - phi_range[0]) / num_bins[2]
+        dpt = np.abs(logpt_range[1] - logpt_range[0]) / (num_bins[0] - 1) 
+        deta = np.abs(eta_range[1] - eta_range[0]) / (num_bins[1] - 1) 
+        dphi = np.abs(phi_range[1] - phi_range[0]) / (num_bins[2] - 1) 
         self.dvol = dpt * deta * dphi  # log of the volume element 
 
         print('INFO: bins:', num_bins)
@@ -63,15 +63,14 @@ class JetGPT2Model(L.LightningModule):
         # self.log_dvol= -7.421279091726184, 
 
         # special tokens:
-
-        self.start_token = self.vocab_size + 1
-        self.end_token = self.vocab_size + 2
-        self.pad_token = self.vocab_size + 3  
+        self.start_token = self.vocab_size
+        self.end_token = self.vocab_size + 1
+        self.pad_token = self.vocab_size + 2   
 
         config = GPT2Config(
-            vocab_size=self.vocab_size + 3, # token vocab + BOS + EOS + pads
-            n_positions=max_seq_length + 2, # seq with BOS and EOS enpoints
-            n_ctx=max_seq_length + 2, # seq with BOS and EOS enpoints
+            vocab_size=self.vocab_size + 3,     # token vocab + BOS + EOS + pads
+            n_positions=max_seq_length + 2,     # seq with BOS and EOS enpoints
+            n_ctx=max_seq_length + 2,           # seq with BOS and EOS enpoints
             n_embd=n_embd,
             n_inner=n_inner if n_inner is not None else 4 * n_embd,
             n_layer=n_layer,

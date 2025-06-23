@@ -116,7 +116,7 @@ class GeneratorCallback(Callback):
 
         #...get test and Aachen data for comparison:
 
-        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned_{self.num_bins[0]}_{self.num_bins[1]}_{self.num_bins[2]}/test_{self.jet_type}_2M_binned.h5', 
+        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned_{self.num_bins[0]-1}_{self.num_bins[1]-1}_{self.num_bins[2]-1}/test_{self.jet_type}_2M_binned.h5', 
                                max_seq_length=self.max_seq_length,
                                num_bins=self.num_bins,
                                start_token=self.start_token,
@@ -366,9 +366,9 @@ def binnify(jets,
     # phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
 
 
-    pt_bins = np.linspace(logpt_range[0], logpt_range[1], num_bins[0])
-    eta_bins = np.linspace(eta_range[0], eta_range[1], num_bins[1])
-    phi_bins = np.linspace(phi_range[0], phi_range[1], num_bins[2])
+    pt_bins = np.linspace(logpt_range[0], logpt_range[1], num_bins[0] - 1)
+    eta_bins = np.linspace(eta_range[0], eta_range[1], num_bins[1] - 1)
+    phi_bins = np.linspace(phi_range[0], phi_range[1], num_bins[2] - 1)
 
     pt_disc = jets[:, :, 0]
     eta_disc = jets[:, :, 1]

@@ -22,7 +22,7 @@ parser.add_argument("--tags", type=str, nargs='*')
 
 parser.add_argument("--jet_type", "-type", type=str, default='ZJetsToNuNu')
 parser.add_argument("--max_seq_length", "-len", type=int, default=40)
-parser.add_argument("--num_bins", "-bins", type=int, nargs=3, default=[40, 30, 30])
+parser.add_argument("--num_bins", "-bins", type=int, nargs=3, default=[41, 31, 31])
 parser.add_argument("--log_pt_range", "-pt", type=float, nargs=2, default=[-0.7602971186041831, 6.906254768371582])
 parser.add_argument("--eta_range", "-eta", type=float, nargs=2, default=[-0.8, 0.8])
 parser.add_argument("--phi_range", "-phi", type=float, nargs=2, default=[-0.8, 0.8])
@@ -55,11 +55,11 @@ logger = CometLogger(
 
 logger.experiment.add_tags(config.tags)
 
-train_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_100M_binned_{config.num_bins[0]}_{config.num_bins[1]}_{config.num_bins[2]}/train_{config.jet_type}_10M_binned.h5", 
+train_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_100M_binned_{config.num_bins[0]-1}_{config.num_bins[1]-1}_{config.num_bins[2]-1}/train_{config.jet_type}_10M_binned.h5", 
                                    max_seq_length=config.max_seq_length,
                                    )
 
-val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/val_5M_binned_{config.num_bins[0]}_{config.num_bins[1]}_{config.num_bins[2]}/val_{config.jet_type}_500K_binned.h5", 
+val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/val_5M_binned_{config.num_bins[0]-1}_{config.num_bins[1]-1}_{config.num_bins[2]-1}/val_{config.jet_type}_500K_binned.h5", 
                                  max_seq_length=config.max_seq_length
                                  )
 

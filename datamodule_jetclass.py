@@ -15,7 +15,7 @@ class JetSequence:
         num_jets: int = None,
         num_jets_min: int = 0,
         max_seq_length: int = 40,  # maximum number of constituents
-        num_bins: list = [40, 30, 30],
+        num_bins: list = [41, 31, 31],
         start_token: int = None,
         end_token: int = None,
         pad_token: int = -1,
@@ -28,7 +28,7 @@ class JetSequence:
         self.pad_token = pad_token
         self.filepath = filepath
         self.num_jets = num_jets
-        self.num_jets_mim = num_jets_min
+        self.num_jets_min = num_jets_min
         self.num_bins = num_bins
         self.max_seq_length = max_seq_length
 
@@ -45,7 +45,7 @@ class JetSequence:
     def _load_data(self, key='discretized/block0_values'):
         with h5py.File(self.filepath, "r") as f:
             arr = f[key]
-            sample = arr[:] if self.num_jets is None else arr[self.num_jets_mim : self.num_jets]
+            sample = arr[:] if self.num_jets is None else arr[self.num_jets_min : self.num_jets]
         N = sample.shape[0]
         return sample.reshape(N, -1, len(self.num_bins))  # (N, D, 3)
 
@@ -127,12 +127,12 @@ class JetSequenceDataset(Dataset):
         num_jets: int = None,
         num_jets_min: int = 0,
         max_seq_length: int = 40,
-        num_bins: list = [40, 30, 30],
+        num_bins: list = [41, 31, 31],
     ):
         vocab_size = int(np.prod(num_bins))
-        start_token = vocab_size + 1 # BOS
-        end_token = vocab_size + 2  # EOS
-        pad_token = vocab_size + 3  # PAD
+        start_token = vocab_size  # BOS
+        end_token = vocab_size + 1  # EOS
+        pad_token = vocab_size + 2  # PAD
 
         if filepath is not None: 
 
