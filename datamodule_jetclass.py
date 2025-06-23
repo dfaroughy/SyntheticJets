@@ -14,7 +14,7 @@ class JetSequence:
         filepath: str = None,
         num_jets: int = None,
         num_jets_min: int = 0,
-        max_seq_length: int = 200,  # maximum number of constituents
+        max_seq_length: int = 40,  # maximum number of constituents
         num_bins: list = [40, 30, 30],
         start_token: int = None,
         end_token: int = None,
@@ -126,13 +126,13 @@ class JetSequenceDataset(Dataset):
         input_ids: str=None,
         num_jets: int = None,
         num_jets_min: int = 0,
-        max_seq_length: int = 200,
+        max_seq_length: int = 40,
         num_bins: list = [40, 30, 30],
     ):
         vocab_size = int(np.prod(num_bins))
-        start_token = vocab_size    # BOS
-        end_token = vocab_size + 1  # EOS
-        pad_token = vocab_size + 2  # PAD
+        start_token = vocab_size + 1 # BOS
+        end_token = vocab_size + 2  # EOS
+        pad_token = vocab_size + 3  # PAD
 
         if filepath is not None: 
 

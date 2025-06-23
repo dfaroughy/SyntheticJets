@@ -17,6 +17,7 @@ parser.add_argument("--comet_workspace", type=str, default='dfaroughy')
 parser.add_argument("--comet_api_key", type=str, default='8ONjCXJ1ogsqG1UxQzKxYn7tz')
 parser.add_argument("--data_path", type=str, default='/pscratch/sd/d/dfarough/JetClass')
 parser.add_argument("--experiment_id", "-id", type=str, default=None)
+parser.add_argument("--checkpoint", "-ckpt", type=str, default='last')
 parser.add_argument("--tags", type=str, nargs='*')
 
 parser.add_argument("--jet_type", "-type", type=str, default='ZJetsToNuNu')
@@ -25,7 +26,7 @@ parser.add_argument("--num_bins", "-bins", type=int, nargs=3, default=[40, 30, 3
 parser.add_argument("--log_pt_range", "-pt", type=float, nargs=2, default=[-0.7602971186041831, 6.906254768371582])
 parser.add_argument("--eta_range", "-eta", type=float, nargs=2, default=[-0.8, 0.8])
 parser.add_argument("--phi_range", "-phi", type=float, nargs=2, default=[-0.8, 0.8])
-parser.add_argument("--batch_size", "-bs", type=int, default=128)
+parser.add_argument("--batch_size", "-bs", type=int, default=256)
 
 parser.add_argument("--n_emb", type=int, default=256)
 parser.add_argument("--n_inner", type=int, default=1024)
@@ -56,14 +57,6 @@ logger.experiment.add_tags(config.tags)
 
 train_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_100M_binned_{config.num_bins[0]}_{config.num_bins[1]}_{config.num_bins[2]}/train_{config.jet_type}_10M_binned.h5", 
                                    max_seq_length=config.max_seq_length,
-                                   )
-
-val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/val_5M_binned_{config.num_bins[0]}_{config.num_bins[1]}_{config.num_bins[2]}/val_{config.jet_type}_500K_binned.h5", 
-                                 max_seq_length=config.max_seq_length
-                                 )
-
-train_dataset = JetSequenceDataset(filepath=f"{config.data_path}/train_100M_binned_{config.num_bins[0]}_{config.num_bins[1]}_{config.num_bins[2]}/train_{config.jet_type}_10M_binned.h5", 
-                                   max_seq_length=config.max_seq_length
                                    )
 
 val_dataset = JetSequenceDataset(filepath=f"{config.data_path}/val_5M_binned_{config.num_bins[0]}_{config.num_bins[1]}_{config.num_bins[2]}/val_{config.jet_type}_500K_binned.h5", 
@@ -126,9 +119,11 @@ if config.experiment_id is None:
                 train_dataloaders=train_loader, 
                 val_dataloaders=val_loader)
 else:
-    ckpt = f"{config.dir}/{config.project_name}/{config.experiment_id}/checkpoints/last.ckpt"
+
+    ckpt = f"{config.dir}/{config.project_name}/{config.experiment_id}/checkpoints/{config.checkpoint}.ckpt"
     model = JetGPT2Model.load_from_checkpoint(ckpt)
-    trainer.fit(model,
+
+    trainer.fit(model=model,
                 train_dataloaders=train_loader,
                 val_dataloaders=val_loader,
                 ckpt_path=ckpt

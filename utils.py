@@ -92,7 +92,7 @@ class GeneratorCallback(Callback):
                               eta_range=self.eta_range, 
                               phi_range=self.phi_range, 
                               num_bins=self.num_bins, 
-                              make_continuous=self.config.make_continuous
+                              make_continuous=self.config.continuous_output
                               )
 
         np.save(f'{self.experiment_dir}/{self.predict_type}_results_{self.tag}/{self.file_name}_binned.npy', data_binned)
@@ -116,12 +116,20 @@ class GeneratorCallback(Callback):
 
         #...get test and Aachen data for comparison:
 
-        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned/test_{self.jet_type}_2M_bins403030.h5', 
+        test_seq = JetSequence(filepath=f'{self.data_dir}/test_20M_binned_{self.num_bins[0]}_{self.num_bins[1]}_{self.num_bins[2]}/test_{self.jet_type}_2M_binned.h5', 
                                max_seq_length=self.max_seq_length,
                                num_bins=self.num_bins,
                                start_token=self.start_token,
                                end_token=self.end_token,
                                pad_token=self.pad_token,)
+
+        test_disc = binnify(jets=torch.tensor(test_seq.data[:N]).long(),
+                            logpt_range=self.logpt_range, 
+                            eta_range=self.eta_range, 
+                            phi_range=self.phi_range, 
+                            num_bins=self.num_bins, 
+                            make_continuous=self.config.continuous_output
+                            )
 
         # test_seq = JetSequence(filepath=f'{self.data_dir}/train_12M_EPiC_FM_binned/{self.jet_type}_EPiC_FM_bins403030.h5', 
         #                        max_seq_length=self.max_seq_length,
@@ -132,14 +140,6 @@ class GeneratorCallback(Callback):
         #                        end_token=self.end_token,
         #                        pad_token=self.pad_token,
         #                        )
-
-        test_disc = binnify(jets=torch.tensor(test_seq.data[:N]).long(),
-                            logpt_range=self.logpt_range, 
-                            eta_range=self.eta_range, 
-                            phi_range=self.phi_range, 
-                            num_bins=self.num_bins, 
-                            make_continuous=self.config.make_continuous
-                            )
 
         # aachen_seq = JetSequence(filepath=f'{self.data_dir}/{self.jet_type}_samples_samples_nsamples2000000_trunc_5000_0.h5', 
         #                          max_seq_length=self.max_seq_length,
@@ -153,7 +153,7 @@ class GeneratorCallback(Callback):
         #                  eta_range=self.eta_range, 
         #                  phi_range=self.phi_range, 
         #                  num_bins=self.num_bins, 
-        #                  make_continuous=self.config.make_continuous
+        #                  make_continuous=self.config.continuous_output
         #                  )
 
         #...plot:
@@ -400,35 +400,6 @@ def binnify(jets,
     return torch.tensor(jets)
 
 
-# def make_continuous(jets, bin_dir='/pscratch/sd/d/dfarough/JetClass'):
-#     pt_bins = np.load(f"{bin_dir}/preprocessing_bins/pt_bins_1Mfromeach_403030.npy")
-#     eta_bins = np.load(f"{bin_dir}/preprocessing_bins/eta_bins_1Mfromeach_403030.npy")
-#     phi_bins = np.load(f"{bin_dir}/preprocessing_bins/phi_bins_1Mfromeach_403030.npy")
-
-#     pt_disc = jets[:, :, 0]
-#     eta_disc = jets[:, :, 1]
-#     phi_disc = jets[:, :, 2]
-
-#     mask = pt_disc < 0
-
-#     pt_con = (pt_disc - np.random.uniform(0.0, 1.0, size=pt_disc.shape)) * (
-#         pt_bins[1] - pt_bins[0]
-#     ) + pt_bins[0]
-
-#     eta_con = (eta_disc - np.random.uniform(0.0, 1.0, size=eta_disc.shape)) * (
-#         eta_bins[1] - eta_bins[0]
-#     ) + eta_bins[0]
-    
-#     phi_con = (phi_disc - np.random.uniform(0.0, 1.0, size=phi_disc.shape)) * (
-#         phi_bins[1] - phi_bins[0]
-#     ) + phi_bins[0]
-
-#     continues_jets = np.stack((np.exp(pt_con), eta_con, phi_con), -1)
-#     continues_jets[mask] = 0
-
-#     return torch.tensor(continues_jets)
-
-
 def jets_HighLevelFeats(sample):
     pt = sample[..., 0]
     eta = sample[..., 1]
@@ -463,8 +434,8 @@ def plot_kin_with_ratio(test_disc, gen, aachen=None, test_cont=None, path='resul
         aachen = aachen.cpu().numpy()
 
     bins = [np.arange(-1, 7, 0.2), 
-            np.arange(-1, 1, 0.05), 
-            np.arange(-1, 1, 0.05), 
+            np.arange(-1.2, 1.2, 0.05), 
+            np.arange(-1.2, 1.2, 0.05), 
             np.arange(0, 128, 2)]
 
     ylims = (0.4, 4.5, 4.5, 0.035)
